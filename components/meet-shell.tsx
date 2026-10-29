@@ -9,6 +9,7 @@ export async function MeetShell({
   layout,
   live = true,
   footer = true,
+  topRight,
   children,
 }: {
   page?: { label: string; href: string; tip: string }
@@ -17,6 +18,8 @@ export async function MeetShell({
   live?: boolean
   /** Hide the bottom corners; the meeting uses that space for its controls. */
   footer?: boolean
+  /** Replaces the account in the top right; the meeting puts its controls there. */
+  topRight?: React.ReactNode
   children: React.ReactNode
 }) {
   const session = await getSession()
@@ -29,6 +32,7 @@ export async function MeetShell({
         ...(page ? [page] : []),
       ]}
       footer={footer}
+      corners={topRight ? { topRight } : undefined}
       account={
         session
           ? {

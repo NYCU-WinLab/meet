@@ -28,6 +28,7 @@ import {
 } from "lucide-react"
 import { useRouter } from "next/navigation"
 import * as React from "react"
+import { createPortal } from "react-dom"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -43,6 +44,9 @@ import { cn } from "@/lib/utils"
 // One meeting: everyone's camera (or their name when it is off), a shared
 // screen when there is one, and the member's own controls. Camera and
 // microphone start on; the browser asks once.
+/** The top-right corner the page leaves empty for the controls. */
+export const CONTROLS_SLOT = "meet-controls"
+
 export function Meeting({
   serverUrl,
   token,
@@ -65,14 +69,12 @@ export function Meeting({
       className="fixed top-18 right-6 bottom-6 left-6 flex gap-6"
     >
       <RoomAudioRenderer />
-      <div className="flex min-w-0 flex-1 flex-col gap-6">
-        <Stage />
-        <Controls
-          chatOpen={chatOpen}
-          onChatToggle={() => setChatOpen((open) => !open)}
-        />
-      </div>
+      <Stage />
       {chatOpen && <Chat />}
+      <ControlsInCorner
+        chatOpen={chatOpen}
+        onChatToggle={() => setChatOpen((open) => !open)}
+      />
     </LiveKitRoom>
   )
 }
@@ -187,6 +189,17 @@ function Tile({
 }
 
 // The member's own controls, in the order they reach for them.
+// The controls live in the shell's top-right corner, outside this tree, so
+// they reach it through a portal once the corner exists.
+function ControlsInCorner(props: React.ComponentProps<typeof Controls>) {
+  const slot = React.useSyncExternalStore(
+    () => () => {},
+    () => document.getElementById(CONTROLS_SLOT),
+    () => null
+  )
+  return slot ? createPortal(<Controls {...props} />, slot) : null
+}
+
 function Controls({
   chatOpen,
   onChatToggle,
@@ -213,7 +226,7 @@ function Controls({
 
   return (
     <TooltipProvider>
-      <div className="flex justify-center gap-3">
+      <div className="flex items-center gap-3">
         <Control
           label={isMicrophoneEnabled ? "關麥克風" : "開麥克風"}
           active={isMicrophoneEnabled}

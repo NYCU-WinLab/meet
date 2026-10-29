@@ -7,7 +7,7 @@ import { runAction } from "@/lib/actions/define"
 import { joinRoom } from "@/lib/actions/rooms"
 import { requireActor } from "@/lib/auth/session"
 
-import { Meeting } from "./meeting"
+import { CONTROLS_SLOT, Meeting } from "./meeting"
 
 export const dynamic = "force-dynamic"
 
@@ -38,6 +38,7 @@ export default async function RoomPage({ params }: PageProps<"/r/[room]">) {
       layout="wide"
       live={false}
       footer={false}
+      topRight={<div id={CONTROLS_SLOT} className="flex items-center gap-3" />}
       page={{ label: joined.title, href: `/r/${room}`, tip: "" }}
     >
       <Meeting serverUrl={joined.serverUrl} token={joined.token} />
