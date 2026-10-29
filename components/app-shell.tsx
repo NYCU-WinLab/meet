@@ -60,6 +60,7 @@ function AppShell({
   account,
   layout = "column",
   corners,
+  footer = true,
   children,
 }: {
   breadcrumb?: Crumb[]
@@ -77,6 +78,9 @@ function AppShell({
     >
   >
   layout?: "column" | "spotlight" | "wide"
+  /** false drops both bottom corners: a page that fills the screen, such as
+   * a meeting, keeps its own controls there. */
+  footer?: boolean
   children: React.ReactNode
 }) {
   const pathname = usePathname()
@@ -90,10 +94,12 @@ function AppShell({
         aria-hidden
         className="pointer-events-none fixed inset-x-0 top-0 z-40 h-16 mask-b-from-0% backdrop-blur-md"
       />
-      <div
-        aria-hidden
-        className="pointer-events-none fixed inset-x-0 bottom-0 z-40 h-16 mask-t-from-0% backdrop-blur-md"
-      />
+      {footer && (
+        <div
+          aria-hidden
+          className="pointer-events-none fixed inset-x-0 bottom-0 z-40 h-16 mask-t-from-0% backdrop-blur-md"
+        />
+      )}
 
       <header className="fixed top-6 left-6 z-50 flex items-center gap-4">
         {corners?.topLeft ?? (
@@ -137,22 +143,26 @@ function AppShell({
         )}
       </div>
 
-      <div className="fixed bottom-6 left-6 z-50 flex items-center gap-4">
-        {corners?.bottomLeft ?? <BuildVersion />}
-      </div>
+      {footer && (
+        <div className="fixed bottom-6 left-6 z-50 flex items-center gap-4">
+          {corners?.bottomLeft ?? <BuildVersion />}
+        </div>
+      )}
 
-      <div className="fixed right-6 bottom-6 z-50 flex items-center gap-4">
-        {corners?.bottomRight ?? (
-          <CornerTip tip="NYCU WinLab" corner="bottom-right">
-            <span
-              tabIndex={0}
-              className={cn(cornerLinkClassName, "cursor-default")}
-            >
-              © {new Date().getFullYear()}
-            </span>
-          </CornerTip>
-        )}
-      </div>
+      {footer && (
+        <div className="fixed right-6 bottom-6 z-50 flex items-center gap-4">
+          {corners?.bottomRight ?? (
+            <CornerTip tip="NYCU WinLab" corner="bottom-right">
+              <span
+                tabIndex={0}
+                className={cn(cornerLinkClassName, "cursor-default")}
+              >
+                © {new Date().getFullYear()}
+              </span>
+            </CornerTip>
+          )}
+        </div>
+      )}
 
       {layout === "spotlight" ? (
         <main className="flex min-h-svh w-full items-center justify-center px-6 py-24">

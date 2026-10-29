@@ -34,11 +34,9 @@ export async function MeetShell({
         ...(page ? [page] : []),
       ]}
       nav={[{ label: "會議室", href: "/", tip: "" }]}
+      footer={footer}
       corners={{
-        bottomRight: footer ? undefined : <></>,
-        bottomLeft: !footer ? (
-          <></>
-        ) : (
+        bottomLeft: (
           <>
             {session && (
               <CornerTip tip={session.user.email} corner="bottom-left">
