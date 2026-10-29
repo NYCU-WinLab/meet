@@ -62,7 +62,7 @@ export function Meeting({
       onMediaDeviceFailure={(failure) => {
         if (failure) toast.error("開不了鏡頭或麥克風，請檢查瀏覽器權限")
       }}
-      className="fixed top-22 right-6 bottom-6 left-6 flex gap-6"
+      className="fixed top-18 right-6 bottom-6 left-6 flex gap-6"
     >
       <RoomAudioRenderer />
       <div className="flex min-w-0 flex-1 flex-col gap-6">
