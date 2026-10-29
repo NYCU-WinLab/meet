@@ -13,12 +13,15 @@ export async function MeetShell({
   page,
   layout,
   live = true,
+  footer = true,
   children,
 }: {
   page?: { label: string; href: string; tip: string }
   layout?: "column" | "spotlight" | "wide"
   /** Refresh when rooms change; off inside a meeting, which is live itself. */
   live?: boolean
+  /** Hide the bottom corners; the meeting uses that space for its controls. */
+  footer?: boolean
   children: React.ReactNode
 }) {
   const session = await getSession()
@@ -32,7 +35,10 @@ export async function MeetShell({
       ]}
       nav={[{ label: "會議室", href: "/", tip: "" }]}
       corners={{
-        bottomLeft: (
+        bottomRight: footer ? undefined : <></>,
+        bottomLeft: !footer ? (
+          <></>
+        ) : (
           <>
             {session && (
               <CornerTip tip={session.user.email} corner="bottom-left">

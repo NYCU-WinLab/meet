@@ -18,6 +18,7 @@ import {
   LinkIcon,
   LogOutIcon,
   MicIcon,
+  MessageSquareIcon,
   MicOffIcon,
   MonitorUpIcon,
   MonitorXIcon,
@@ -50,6 +51,7 @@ export function Meeting({
   token: string
 }) {
   const router = useRouter()
+  const [chatOpen, setChatOpen] = React.useState(false)
   return (
     <LiveKitRoom
       serverUrl={serverUrl}
@@ -62,14 +64,17 @@ export function Meeting({
       onMediaDeviceFailure={(failure) => {
         if (failure) toast.error("開不了鏡頭或麥克風，請檢查瀏覽器權限")
       }}
-      className="fixed top-24 right-6 bottom-24 left-6 flex gap-6"
+      className="fixed top-24 right-6 bottom-6 left-6 flex gap-6"
     >
       <RoomAudioRenderer />
       <div className="flex min-w-0 flex-1 flex-col gap-6">
         <Stage />
-        <Controls />
+        <Controls
+          chatOpen={chatOpen}
+          onChatToggle={() => setChatOpen((open) => !open)}
+        />
       </div>
-      <Chat />
+      {chatOpen && <Chat />}
     </LiveKitRoom>
   )
 }
@@ -189,7 +194,13 @@ function Tile({
 }
 
 // The member's own controls, in the order they reach for them.
-function Controls() {
+function Controls({
+  chatOpen,
+  onChatToggle,
+}: {
+  chatOpen: boolean
+  onChatToggle: () => void
+}) {
   const room = useRoomContext()
   const { isMicrophoneEnabled, isCameraEnabled, isScreenShareEnabled } =
     useLocalParticipant()
@@ -233,6 +244,13 @@ function Controls() {
           onClick={() => screen.toggle()}
         >
           {isScreenShareEnabled ? <MonitorXIcon /> : <MonitorUpIcon />}
+        </Control>
+        <Control
+          label={chatOpen ? "收起聊天" : "聊天"}
+          active={chatOpen}
+          onClick={onChatToggle}
+        >
+          <MessageSquareIcon />
         </Control>
         <Tooltip>
           <TooltipTrigger
@@ -281,7 +299,7 @@ function Control({
 }: {
   label: string
   active: boolean
-  pending: boolean
+  pending?: boolean
   onClick: () => void
   children: React.ReactNode
 }) {
@@ -327,7 +345,7 @@ function Chat() {
   }
 
   return (
-    <aside className="hidden w-80 shrink-0 flex-col gap-4 border-l pl-6 md:flex">
+    <aside className="flex w-80 shrink-0 flex-col gap-4 border-l pl-6">
       <ol className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
         {chatMessages.length === 0 && (
           <li className="text-muted-foreground">還沒有人說話</li>
