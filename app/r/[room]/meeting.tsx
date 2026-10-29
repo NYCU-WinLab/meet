@@ -3,18 +3,17 @@
 import {
   LiveKitRoom,
   RoomAudioRenderer,
-  useConnectionState,
+  useChat,
   useIsMuted,
   useIsSpeaking,
   useLocalParticipant,
-  useParticipants,
   useRoomContext,
   useTrackToggle,
   useTracks,
   VideoTrack,
   type TrackReferenceOrPlaceholder,
 } from "@livekit/components-react"
-import { ConnectionState, Track } from "livekit-client"
+import { Track } from "livekit-client"
 import {
   LinkIcon,
   LogOutIcon,
@@ -22,6 +21,7 @@ import {
   MicOffIcon,
   MonitorUpIcon,
   MonitorXIcon,
+  SendIcon,
   VideoIcon,
   VideoOffIcon,
 } from "lucide-react"
@@ -29,8 +29,8 @@ import { useRouter } from "next/navigation"
 import * as React from "react"
 import { toast } from "sonner"
 
-import { PageHeader } from "@/components/page-header"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import {
   Tooltip,
   TooltipContent,
@@ -43,11 +43,9 @@ import { cn } from "@/lib/utils"
 // screen when there is one, and the member's own controls. Camera and
 // microphone start on; the browser asks once.
 export function Meeting({
-  title,
   serverUrl,
   token,
 }: {
-  title: string
   serverUrl: string
   token: string
 }) {
@@ -64,48 +62,15 @@ export function Meeting({
       onMediaDeviceFailure={(failure) => {
         if (failure) toast.error("開不了鏡頭或麥克風，請檢查瀏覽器權限")
       }}
-      className="flex min-h-full flex-col gap-6"
+      className="fixed top-24 right-6 bottom-24 left-6 flex gap-6"
     >
       <RoomAudioRenderer />
-      <Header title={title} />
-      <Stage />
-      <Controls />
+      <div className="flex min-w-0 flex-1 flex-col gap-6">
+        <Stage />
+        <Controls />
+      </div>
+      <Chat />
     </LiveKitRoom>
-  )
-}
-
-function Header({ title }: { title: string }) {
-  const participants = useParticipants()
-  const state = useConnectionState()
-  const status =
-    state === ConnectionState.Connected
-      ? `${participants.length} 人`
-      : state === ConnectionState.Reconnecting
-        ? "重新連線中…"
-        : "連線中…"
-  return (
-    <PageHeader
-      title={
-        <span className="flex items-baseline gap-3">
-          <span className="truncate">{title}</span>
-          <span className="shrink-0 text-body font-normal text-muted-foreground">
-            {status}
-          </span>
-        </span>
-      }
-      actions={
-        <Button
-          variant="outline"
-          onClick={async () => {
-            await navigator.clipboard.writeText(window.location.href)
-            toast.success("已複製會議連結")
-          }}
-        >
-          <LinkIcon />
-          複製連結
-        </Button>
-      }
-    />
   )
 }
 
@@ -125,7 +90,7 @@ function Stage() {
   if (screens.length > 0) {
     return (
       <div className="flex min-h-0 flex-1 flex-col gap-4">
-        <Tile trackRef={screens[0]} screen className="flex-1" />
+        <Tile trackRef={screens[0]} screen className="min-h-0 flex-1" />
         <div className="flex gap-4 overflow-x-auto pb-1">
           {cameras.map((trackRef) => (
             <Tile
@@ -148,7 +113,12 @@ function Stage() {
           ? "grid-cols-2 md:grid-cols-3"
           : "grid-cols-2 md:grid-cols-4"
   return (
-    <div className={cn("grid flex-1 content-center gap-4", columns)}>
+    <div
+      className={cn(
+        "grid min-h-0 flex-1 content-center justify-center gap-4",
+        columns
+      )}
+    >
       {cameras.map((trackRef) => (
         <Tile key={tileKey(trackRef)} trackRef={trackRef} />
       ))}
@@ -187,7 +157,7 @@ function Tile({
     <div
       className={cn(
         "relative overflow-hidden rounded-control bg-muted transition-all duration-state",
-        screen ? "min-h-64" : "aspect-video",
+        screen ? "" : "aspect-video max-h-full",
         speaking && !screen && "ring-2 ring-primary",
         className
       )}
@@ -264,6 +234,24 @@ function Controls() {
           <TooltipTrigger
             render={
               <Button
+                variant="outline"
+                size="icon"
+                aria-label="複製會議連結"
+                onClick={async () => {
+                  await navigator.clipboard.writeText(window.location.href)
+                  toast.success("已複製會議連結")
+                }}
+              />
+            }
+          >
+            <LinkIcon />
+          </TooltipTrigger>
+          <TooltipContent>複製會議連結</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
                 variant="destructive"
                 size="icon"
                 aria-label="離開會議"
@@ -311,5 +299,68 @@ function Control({
       </TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>
     </Tooltip>
+  )
+}
+
+// Text beside the video: what was said while the meeting is open; nothing is
+// kept once it ends.
+function Chat() {
+  const { chatMessages, send, isSending } = useChat()
+  const { localParticipant } = useLocalParticipant()
+  const bottom = React.useRef<HTMLLIElement>(null)
+  const [draft, setDraft] = React.useState("")
+
+  React.useEffect(() => {
+    bottom.current?.scrollIntoView({ block: "end" })
+  }, [chatMessages.length])
+
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const text = draft.trim()
+    if (!text) return
+    setDraft("")
+    await send(text)
+  }
+
+  return (
+    <aside className="hidden w-80 shrink-0 flex-col gap-4 border-l pl-6 md:flex">
+      <ol className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
+        {chatMessages.length === 0 && (
+          <li className="text-muted-foreground">還沒有人說話</li>
+        )}
+        {chatMessages.map((message) => {
+          const mine = message.from?.identity === localParticipant.identity
+          return (
+            <li key={message.id ?? message.timestamp} className="flex flex-col">
+              <span className="text-muted-foreground">
+                {mine ? "我" : (message.from?.name ?? message.from?.identity)}
+              </span>
+              <span className="break-words whitespace-pre-wrap">
+                {message.message}
+              </span>
+            </li>
+          )
+        })}
+        <li ref={bottom} aria-hidden />
+      </ol>
+      <form onSubmit={submit} className="flex gap-2">
+        <Input
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          placeholder="說點什麼"
+          aria-label="訊息"
+          maxLength={2000}
+        />
+        <Button
+          type="submit"
+          size="icon"
+          variant="outline"
+          aria-label="送出"
+          disabled={isSending || !draft.trim()}
+        >
+          <SendIcon />
+        </Button>
+      </form>
+    </aside>
   )
 }
