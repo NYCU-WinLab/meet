@@ -28,22 +28,16 @@ export async function MeetShell({
         { label: "Meet", href: "/", tip: "" },
         ...(page ? [page] : []),
       ]}
-      nav={[{ label: "會議室", href: "/", tip: "" }]}
       footer={footer}
-      corners={{
-        bottomLeft: (
-          <>
-            {session && (
-              <CornerTip tip={session.user.email} corner="bottom-left">
-                <CornerLink href="/profile" prefetch>
-                  {session.user.name}
-                </CornerLink>
-              </CornerTip>
-            )}
-            <BuildVersion />
-          </>
-        ),
-      }}
+      account={
+        session
+          ? {
+              label: session.user.name,
+              href: "https://portal.winlab.tw/members",
+              tip: session.user.email,
+            }
+          : { label: "登入", href: "/sign-in", tip: "" }
+      }
     >
       {live && <LiveRefresh />}
       {children}
