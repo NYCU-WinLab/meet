@@ -1,14 +1,9 @@
-import {
-  AppShell,
-  BuildVersion,
-  CornerLink,
-  CornerTip,
-} from "@/components/app-shell"
+import { AppShell } from "@/components/app-shell"
 import { LiveRefresh } from "@/components/live-refresh"
 import { getSession } from "@/lib/auth/session"
 
 // Meet's corners: the lab and the page in the breadcrumb, the member's
-// account next to the build in the bottom left.
+// account in the top right, the build in the bottom left.
 export async function MeetShell({
   page,
   layout,

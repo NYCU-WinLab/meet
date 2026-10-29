@@ -57,14 +57,12 @@ export function Meeting({
       serverUrl={serverUrl}
       token={token}
       connect
-      audio
-      video
       onDisconnected={() => router.push("/")}
       onError={(error) => toast.error(error.message)}
       onMediaDeviceFailure={(failure) => {
         if (failure) toast.error("開不了鏡頭或麥克風，請檢查瀏覽器權限")
       }}
-      className="fixed top-24 right-6 bottom-6 left-6 flex gap-6"
+      className="fixed top-22 right-6 bottom-6 left-6 flex gap-6"
     >
       <RoomAudioRenderer />
       <div className="flex min-w-0 flex-1 flex-col gap-6">
@@ -94,7 +92,7 @@ function Stage() {
 
   if (screens.length > 0) {
     return (
-      <div className="flex min-h-0 flex-1 flex-col gap-4">
+      <div className="flex min-h-0 flex-1 flex-col gap-6">
         <Tile trackRef={screens[0]} screen className="min-h-0 flex-1" />
         <div className="flex gap-4 overflow-x-auto pb-1">
           {cameras.map((trackRef) => (
@@ -118,12 +116,7 @@ function Stage() {
           ? "grid-cols-2 md:grid-cols-3"
           : "grid-cols-2 md:grid-cols-4"
   return (
-    <div
-      className={cn(
-        "grid min-h-0 flex-1 content-center justify-center gap-4",
-        columns
-      )}
-    >
+    <div className={cn("grid min-h-0 flex-1 auto-rows-fr gap-6", columns)}>
       {cameras.map((trackRef) => (
         <Tile key={tileKey(trackRef)} trackRef={trackRef} />
       ))}
@@ -162,7 +155,7 @@ function Tile({
     <div
       className={cn(
         "relative overflow-hidden rounded-control bg-muted transition-all duration-state",
-        screen ? "" : "aspect-video max-h-full",
+        !screen && "min-h-0",
         speaking && !screen && "ring-2 ring-primary",
         className
       )}
@@ -345,7 +338,7 @@ function Chat() {
   }
 
   return (
-    <aside className="flex w-80 shrink-0 flex-col gap-4 border-l pl-6">
+    <aside className="flex w-80 shrink-0 flex-col gap-4 rounded-control bg-muted p-4">
       <ol className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
         {chatMessages.length === 0 && (
           <li className="text-muted-foreground">還沒有人說話</li>
