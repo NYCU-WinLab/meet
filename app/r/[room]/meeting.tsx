@@ -101,7 +101,7 @@ function Stage() {
             <Tile
               key={tileKey(trackRef)}
               trackRef={trackRef}
-              className="w-48 shrink-0"
+              className="aspect-video w-48 shrink-0"
             />
           ))}
         </div>

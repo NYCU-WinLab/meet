@@ -10,19 +10,16 @@ export function LiveRefresh() {
   const router = useRouter()
   React.useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined
-    let opened = false
     const refresh = () => {
       clearTimeout(timer)
       timer = setTimeout(() => router.refresh(), 300)
     }
     const source = new EventSource("/api/events")
     source.onmessage = refresh
-    // After a dropped connection (sleep, network change) changes may have
-    // been missed, so catch up once it is back.
-    source.onopen = () => {
-      if (opened) refresh()
-      opened = true
-    }
+    // The page may have arrived from a prefetch made minutes ago, and after
+    // a dropped connection (sleep, network change) changes may have been
+    // missed, so catch up whenever the stream opens.
+    source.onopen = refresh
     return () => {
       clearTimeout(timer)
       source.close()
