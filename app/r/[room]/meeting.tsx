@@ -195,11 +195,15 @@ function Controls() {
     useLocalParticipant()
   const mic = useTrackToggle({ source: Track.Source.Microphone })
   const camera = useTrackToggle({ source: Track.Source.Camera })
+  const wasSharing = React.useRef(false)
   const screen = useTrackToggle({
     source: Track.Source.ScreenShare,
     captureOptions: { audio: true },
     onChange: (enabled, isUserInitiated) => {
-      if (!enabled && !isUserInitiated) toast("已停止分享螢幕")
+      // The browser's own "stop sharing" bar ends the share without us.
+      if (wasSharing.current && !enabled && !isUserInitiated)
+        toast("已停止分享螢幕")
+      wasSharing.current = enabled
     },
   })
 
