@@ -38,7 +38,9 @@ export default async function RoomPage({ params }: PageProps<"/r/[room]">) {
       layout="wide"
       live={false}
       footer={false}
-      topRight={<div id={CONTROLS_SLOT} className="flex items-center gap-3" />}
+      topRight={
+        <div id={CONTROLS_SLOT} className="hidden items-center gap-3 md:flex" />
+      }
       page={{ label: joined.title, href: `/r/${room}`, tip: "" }}
     >
       <Meeting serverUrl={joined.serverUrl} token={joined.token} />

@@ -22,6 +22,8 @@ import {
   MicOffIcon,
   MonitorUpIcon,
   MonitorXIcon,
+  PinIcon,
+  PinOffIcon,
   SendIcon,
   VideoIcon,
   VideoOffIcon,
@@ -66,11 +68,25 @@ export function Meeting({
       onMediaDeviceFailure={(failure) => {
         if (failure) toast.error("開不了鏡頭或麥克風，請檢查瀏覽器權限")
       }}
-      className="fixed top-22 right-6 bottom-6 left-6 flex gap-6"
+      className="fixed top-18 right-6 bottom-6 left-6 flex flex-col gap-6 md:top-22 md:flex-row"
     >
       <RoomAudioRenderer />
-      <Stage />
+      {/* A phone shows the chat instead of the stage; wider screens show both. */}
+      <div
+        className={cn(
+          "min-h-0 min-w-0 flex-1 flex-col",
+          chatOpen ? "hidden md:flex" : "flex"
+        )}
+      >
+        <Stage />
+      </div>
       {chatOpen && <Chat />}
+      <div className="flex justify-center md:hidden">
+        <Controls
+          chatOpen={chatOpen}
+          onChatToggle={() => setChatOpen((open) => !open)}
+        />
+      </div>
       <ControlsInCorner
         chatOpen={chatOpen}
         onChatToggle={() => setChatOpen((open) => !open)}
@@ -89,38 +105,62 @@ function Stage() {
     ],
     { onlySubscribed: false }
   )
-  const screens = tracks.filter((t) => t.source === Track.Source.ScreenShare)
-  const cameras = tracks.filter((t) => t.source === Track.Source.Camera)
+  // A pinned tile fills the stage; otherwise the first screen share does.
+  const [pinnedKey, setPinnedKey] = React.useState<string | null>(null)
+  const pinned = tracks.find((t) => tileKey(t) === pinnedKey)
+  const featured =
+    pinned ?? tracks.find((t) => t.source === Track.Source.ScreenShare)
+  const pin = (trackRef: TrackReferenceOrPlaceholder) =>
+    setPinnedKey((key) =>
+      key === tileKey(trackRef) ? null : tileKey(trackRef)
+    )
 
-  if (screens.length > 0) {
+  if (featured) {
+    const rest = tracks.filter((t) => t !== featured)
     return (
       <div className="flex min-h-0 flex-1 flex-col gap-6">
-        <Tile trackRef={screens[0]} screen className="min-h-0 flex-1" />
-        <div className="flex gap-4 overflow-x-auto pb-1">
-          {cameras.map((trackRef) => (
-            <Tile
-              key={tileKey(trackRef)}
-              trackRef={trackRef}
-              className="aspect-video w-48 shrink-0"
-            />
-          ))}
-        </div>
+        <Tile
+          trackRef={featured}
+          pinned={pinned !== undefined}
+          onPin={() => pin(featured)}
+          className="min-h-0 flex-1"
+        />
+        {rest.length > 0 && (
+          <div className="flex gap-4 overflow-x-auto pb-1">
+            {rest.map((trackRef) => (
+              <Tile
+                key={tileKey(trackRef)}
+                trackRef={trackRef}
+                onPin={() => pin(trackRef)}
+                className="aspect-video w-48 shrink-0"
+              />
+            ))}
+          </div>
+        )}
       </div>
     )
   }
 
+  // A phone held upright stacks the tiles; a wide screen lays them side by
+  // side.
   const columns =
-    cameras.length <= 1
+    tracks.length <= 1
       ? "grid-cols-1"
-      : cameras.length <= 4
-        ? "grid-cols-2"
-        : cameras.length <= 9
-          ? "grid-cols-2 md:grid-cols-3"
-          : "grid-cols-2 md:grid-cols-4"
+      : tracks.length <= 2
+        ? "grid-cols-1 landscape:grid-cols-2"
+        : tracks.length <= 4
+          ? "grid-cols-2"
+          : tracks.length <= 9
+            ? "grid-cols-2 landscape:grid-cols-3"
+            : "grid-cols-2 landscape:grid-cols-4"
   return (
     <div className={cn("grid min-h-0 flex-1 auto-rows-fr gap-6", columns)}>
-      {cameras.map((trackRef) => (
-        <Tile key={tileKey(trackRef)} trackRef={trackRef} />
+      {tracks.map((trackRef) => (
+        <Tile
+          key={tileKey(trackRef)}
+          trackRef={trackRef}
+          onPin={() => pin(trackRef)}
+        />
       ))}
     </div>
   )
@@ -134,14 +174,17 @@ function tileKey(trackRef: TrackReferenceOrPlaceholder) {
 // a ring while they speak, and a mark when their microphone is off.
 function Tile({
   trackRef,
-  screen = false,
+  pinned = false,
+  onPin,
   className,
 }: {
   trackRef: TrackReferenceOrPlaceholder
-  screen?: boolean
+  pinned?: boolean
+  onPin: () => void
   className?: string
 }) {
   const { participant } = trackRef
+  const screen = trackRef.source === Track.Source.ScreenShare
   const speaking = useIsSpeaking(participant)
   const micMuted = useIsMuted({
     source: Track.Source.Microphone,
@@ -184,6 +227,19 @@ function Tile({
           <MicOffIcon aria-label="麥克風已關" className="size-4 shrink-0" />
         )}
       </div>
+      <Button
+        variant="ghost"
+        size="icon"
+        aria-label={pinned ? "取消釘選" : "釘選"}
+        aria-pressed={pinned}
+        onClick={onPin}
+        className={cn(
+          "absolute top-3 right-3 bg-overlay backdrop-blur-md",
+          !pinned && "text-muted-foreground"
+        )}
+      >
+        {pinned ? <PinOffIcon /> : <PinIcon />}
+      </Button>
     </div>
   )
 }
@@ -351,7 +407,7 @@ function Chat() {
   }
 
   return (
-    <aside className="flex w-80 shrink-0 flex-col gap-4 rounded-control bg-muted p-4">
+    <aside className="flex min-h-0 flex-1 flex-col gap-4 rounded-control bg-muted p-4 md:w-80 md:flex-none">
       <ol className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
         {chatMessages.length === 0 && (
           <li className="text-muted-foreground">還沒有人說話</li>
