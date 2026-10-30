@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic"
 
 export default async function Home() {
   const actor = await requireActor("/")
-  const [{ rooms }, { groups }, me] = await Promise.all([
+  const [{ rooms, scheduled }, { groups }, me] = await Promise.all([
     runAction(listRooms, actor, {}),
     runAction(listGroups, actor, {}).catch(() => ({ groups: [] })),
     runAction(whoami, actor, {}),
@@ -24,7 +24,7 @@ export default async function Home() {
           title="會議室"
           actions={<CreateRoom groups={groups} self={me.username ?? me.name} />}
         />
-        <RoomList rooms={rooms} />
+        <RoomList rooms={rooms} scheduled={scheduled} />
       </div>
     </MeetShell>
   )

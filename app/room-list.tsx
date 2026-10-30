@@ -18,15 +18,60 @@ const time = new Intl.DateTimeFormat("zh-TW", {
   timeZone: "Asia/Taipei",
 })
 
-// Every open room as one row: title, who is in it, and the way in.
-export function RoomList({ rooms }: { rooms: RoomSummary[] }) {
+const day = new Intl.DateTimeFormat("zh-TW", {
+  month: "numeric",
+  day: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+  timeZone: "Asia/Taipei",
+})
+
+export type Scheduled = {
+  name: string
+  title: string
+  prefix: string
+  createdBy: string
+  booking: string
+  startsAt: Date
+  endsAt: Date
+}
+
+// Every open room as one row: title, who is in it, and the way in. Rooms
+// booked ahead follow, with when they start.
+export function RoomList({
+  rooms,
+  scheduled,
+}: {
+  rooms: RoomSummary[]
+  scheduled: Scheduled[]
+}) {
   const router = useRouter()
   const [ending, startEnding] = React.useTransition()
 
-  if (rooms.length === 0) return <EmptyState noun="會議室" />
+  if (rooms.length === 0 && scheduled.length === 0)
+    return <EmptyState noun="會議室" />
 
   return (
     <ul className="flex stagger-rise flex-col">
+      {scheduled.map((room) => (
+        <li
+          key={room.name}
+          className="flex min-h-20 flex-col gap-3 border-b py-4 sm:flex-row sm:items-center sm:gap-6"
+        >
+          <div className="flex min-w-0 flex-1 flex-col">
+            <span className="truncate font-medium">{room.title}</span>
+            <span className="truncate text-muted-foreground">
+              {`${room.createdBy} 預約，${day.format(room.startsAt)} 開始，${time.format(room.endsAt)} 結束`}
+            </span>
+          </div>
+          <div className="flex shrink-0 gap-3">
+            <Link href={`/r/${room.name}`} className={buttonVariants()}>
+              進入
+            </Link>
+          </div>
+        </li>
+      ))}
       {rooms.map((room) => (
         <li
           key={room.name}

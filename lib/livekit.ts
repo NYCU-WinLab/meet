@@ -9,8 +9,6 @@ import {
   WebhookReceiver,
   type WebhookEvent,
   EncodedFileOutput,
-  RoomCompositeEgressRequest,
-  RoomEgress,
 } from "livekit-server-sdk"
 
 const url = () => process.env.LIVEKIT_URL!
@@ -37,6 +35,9 @@ export type RoomMetadata = {
   group: string
   /** The portal room-booking id the room was opened for, or "". */
   booking: string
+  /** When the booking ends, UTC as 2006-01-02T150405, or "". The egress
+   * uploader holds the booking's recordings until then and joins them. */
+  until: string
 }
 
 /** What the recording is filed under: the group, else the opener. */
@@ -61,9 +62,17 @@ function parseMetadata(raw: string): RoomMetadata {
       opener: String(data.opener ?? ""),
       group: String(data.group ?? ""),
       booking: String(data.booking ?? ""),
+      until: String(data.until ?? ""),
     }
   } catch {
-    return { title: "", createdBy: "", opener: "", group: "", booking: "" }
+    return {
+      title: "",
+      createdBy: "",
+      opener: "",
+      group: "",
+      booking: "",
+      until: "",
+    }
   }
 }
 
@@ -91,15 +100,15 @@ export async function listRooms(): Promise<RoomSummary[]> {
   return summaries.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
 }
 
-/** Opens a room that stays up to 10 minutes while empty. */
-// Every room records itself: the egress service composes the grid into an
-// MP4 the moment the room starts and stops when it ends. The file lands on
-// the egress machine, whose uploader moves it to Nextcloud and hands the
-// fields in the name to the lab's GitLab helper (see README, Recording):
-// meet~<room>~{time}~<group>~<opener>~<booking>~<title>.mp4. "~" separates
-// because no id contains it; {time} is UTC as 2006-01-02T150405, filled in
-// by egress. An id that does not fit the pattern is filed as "" rather
-// than stopping the room from opening.
+// A room records itself from the moment a second member is in it (the
+// webhook starts the egress) until it closes: the egress service composes
+// the grid into an MP4. The file lands on the egress machine, whose
+// uploader moves it to Nextcloud and hands the fields in the name to the
+// lab's GitLab helper (see README, Recording):
+// meet~<room>~{time}~<group>~<opener>~<booking>~<until>~<title>.mp4. "~"
+// separates because no id contains it; {time} is UTC as 2006-01-02T150405,
+// filled in by egress. An id that does not fit the pattern is filed as ""
+// rather than stopping the room from opening.
 const idPattern = /^[A-Za-z0-9._-]{1,64}$/
 const safeId = (id: string) => (idPattern.test(id) ? id : "")
 const safeTitle = (title: string) =>
@@ -116,23 +125,17 @@ export function recordingPath(name: string, metadata: RoomMetadata) {
     safeId(metadata.group),
     safeId(metadata.opener),
     safeId(metadata.booking),
+    safeId(metadata.until),
     safeTitle(metadata.title) || name,
   ]
   return `/out/recordings/${fields.join("~")}.mp4`
 }
 
-function autoRecording(name: string, metadata: RoomMetadata) {
-  return new RoomEgress({
-    room: new RoomCompositeEgressRequest({
-      roomName: name,
-      layout: "grid",
-      fileOutputs: [
-        new EncodedFileOutput({ filepath: recordingPath(name, metadata) }),
-      ],
-    }),
-  })
-}
+/** Formats a time the way egress stamps {time}: UTC, 2006-01-02T150405. */
+export const stamp = (date: Date) =>
+  date.toISOString().replace(/:/g, "").slice(0, 17)
 
+/** Opens a room that stays up to 10 minutes while empty. */
 export async function createRoom(name: string, metadata: RoomMetadata) {
   await api().room.createRoom({
     name,
@@ -140,8 +143,28 @@ export async function createRoom(name: string, metadata: RoomMetadata) {
     emptyTimeout: 10 * 60,
     departureTimeout: 60,
     maxParticipants: 50,
-    egress: autoRecording(name, metadata),
   })
+}
+
+/** Members in a room now (not egress, not agents). */
+export async function memberCount(name: string) {
+  const participants = await api().room.listParticipants(name)
+  return participants.filter((p) => p.kind === 0 || p.kind === undefined).length
+}
+
+/** Starts the room's recording unless one is already running. */
+export async function startRecording(name: string, rawMetadata: string) {
+  const lk = api()
+  const running = await lk.egress.listEgress({ roomName: name, active: true })
+  if (running.length > 0) return false
+  await lk.egress.startRoomCompositeEgress(
+    name,
+    new EncodedFileOutput({
+      filepath: recordingPath(name, parseMetadata(rawMetadata)),
+    }),
+    { layout: "grid" }
+  )
+  return true
 }
 
 export async function getRoom(name: string) {

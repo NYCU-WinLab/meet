@@ -11,6 +11,15 @@ import { CONTROLS_SLOT, Meeting } from "./meeting"
 
 export const dynamic = "force-dynamic"
 
+const when = new Intl.DateTimeFormat("zh-TW", {
+  month: "numeric",
+  day: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+  timeZone: "Asia/Taipei",
+})
+
 export default async function RoomPage({ params }: PageProps<"/r/[room]">) {
   const { room } = await params
   const actor = await requireActor(`/r/${room}`)
@@ -23,6 +32,25 @@ export default async function RoomPage({ params }: PageProps<"/r/[room]">) {
       <MeetShell layout="spotlight" live={false}>
         <StatusPage
           title="沒有這個會議室"
+          action={
+            <Link href="/" prefetch className={buttonVariants()}>
+              回到會議室列表
+            </Link>
+          }
+        />
+      </MeetShell>
+    )
+  }
+
+  if (joined.state !== "ready") {
+    return (
+      <MeetShell layout="spotlight" live={false}>
+        <StatusPage
+          title={
+            joined.state === "early"
+              ? `${joined.title} ${when.format(joined.startsAt)} 開始，${when.format(joined.opensAt)} 起可進入`
+              : `${joined.title} 已結束`
+          }
           action={
             <Link href="/" prefetch className={buttonVariants()}>
               回到會議室列表

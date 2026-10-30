@@ -26,6 +26,7 @@ No account to make and nothing to install: lab members sign in with their lab ac
 ## What it does
 
 - **Opens a room** with a title; the link is a short id, and any member can join it.
+- **Books a room ahead** for a portal room booking: the link exists at once, opens 10 minutes before the meeting and dies an hour after it ends.
 - **Meets in the browser**: camera, microphone and screen share, with the speaker ringed and muted members marked.
 - **Shows who is where**: the room list says who is in each room and refreshes as people come and go.
 - **Ends a room** for everyone; an empty room closes by itself after 10 minutes.
@@ -79,15 +80,16 @@ webhook:
 |---|---|
 | `whoami` | The signed-in member |
 | `list_rooms` | Open rooms, who opened them, who is in them |
-| `create_room` | Opens a room and returns its link |
+| `create_room` | Opens a room now and returns its link |
+| `schedule_room`, `update_scheduled_room`, `cancel_scheduled_room` | A room booked ahead, by portal booking id |
 | `end_room` | Closes a room for everyone |
 
 ## Recording
 
-Every room records itself: LiveKit Egress composes the grid into an MP4 from the moment the room opens until it closes. The file lands on the egress machine, whose uploader moves it to Nextcloud and hands it to the lab's GitLab helper (winlab-helper). The helper never parses titles; the fields it needs ride in the file name, separated by `~`, a character no id contains:
+Every room records itself: LiveKit Egress composes the grid into an MP4 from the moment a second member is in the room until it closes (one member alone is not a meeting). The file lands on the egress machine, whose uploader moves it to Nextcloud and hands it to the lab's GitLab helper (winlab-helper). The helper never parses titles; the fields it needs ride in the file name, separated by `~`, a character no id contains:
 
 ```
-meet~<room>~<time>~<group>~<opener>~<booking>~<title>.mp4
+meet~<room>~<time>~<group>~<opener>~<booking>~<until>~<title>.mp4
 ```
 
 | Field | What it is |
@@ -97,9 +99,10 @@ meet~<room>~<time>~<group>~<opener>~<booking>~<title>.mp4
 | `group` | The portal project group's slug, spelled as portal does; empty for a personal meeting |
 | `opener` | The username of the member who opened the room; empty when the account has none |
 | `booking` | The portal `room-booking-…` id the room was opened for, or empty |
+| `until` | When the booking ends, UTC, `2006-01-02T150405`; empty for a room opened on the spot |
 | `title` | The room title, with `/ \ : * ? " < > \| ~` and control characters removed |
 
-An id outside `[A-Za-z0-9._-]{1,64}` is written as empty, never refused. The uploader maps these to the helper's trigger variables (`MEET_ROOM`, `START_TIME`, `GROUP_NAME`, `PERSON`, `BOOKING_REQUEST_ID`, `SUBJECT`); that contract is documented in winlab-helper.
+An id outside `[A-Za-z0-9._-]{1,64}` is written as empty, never refused. A booked room that empties closes after 10 minutes and opens again when members come back, so one booking can leave several files; the uploader holds them until an hour after `until` and joins them into one recording. The uploader maps these to the helper's trigger variables (`MEET_ROOM`, `START_TIME`, `GROUP_NAME`, `PERSON`, `BOOKING_REQUEST_ID`, `SUBJECT`); that contract is documented in winlab-helper.
 
 ## Develop
 
