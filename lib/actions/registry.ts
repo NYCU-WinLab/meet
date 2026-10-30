@@ -3,6 +3,7 @@ import {
   createRoomAction,
   endRoom,
   joinRoom,
+  listGroups,
   listRooms,
 } from "@/lib/actions/rooms"
 import { dashboard } from "@/lib/actions/dashboard"
@@ -12,6 +13,7 @@ import { whoami } from "@/lib/actions/users"
 export const actions: Action[] = [
   whoami,
   listRooms,
+  listGroups,
   createRoomAction,
   joinRoom,
   endRoom,

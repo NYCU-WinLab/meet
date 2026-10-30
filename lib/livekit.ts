@@ -26,11 +26,18 @@ const api = () =>
   })
 
 /** What a room carries besides its name, set when it is created. */
-export type RoomMetadata = { title: string; createdBy: string }
+export type RoomMetadata = {
+  title: string
+  createdBy: string
+  /** What the recording is filed under: a project group's slug, or the
+   * opener's username. */
+  prefix: string
+}
 
 export type RoomSummary = {
   name: string
   title: string
+  prefix: string
   createdBy: string
   createdAt: Date
   participants: { identity: string; name: string }[]
@@ -42,9 +49,10 @@ function parseMetadata(raw: string): RoomMetadata {
     return {
       title: String(data.title ?? ""),
       createdBy: String(data.createdBy ?? ""),
+      prefix: String(data.prefix ?? ""),
     }
   } catch {
-    return { title: "", createdBy: "" }
+    return { title: "", createdBy: "", prefix: "" }
   }
 }
 
@@ -59,6 +67,7 @@ export async function listRooms(): Promise<RoomSummary[]> {
       return {
         name: room.name,
         title: metadata.title || room.name,
+        prefix: metadata.prefix,
         createdBy: metadata.createdBy,
         createdAt: new Date(Number(room.creationTime) * 1000),
         participants: participants
@@ -74,16 +83,24 @@ export async function listRooms(): Promise<RoomSummary[]> {
 /** Opens a room that stays up to 10 minutes while empty. */
 // Every room records itself: the egress service composes the grid into an
 // MP4 the moment the room starts and stops when it ends. The file lands on
-// the egress machine, whose uploader moves it to Nextcloud.
-function autoRecording(name: string, title: string) {
-  const safeTitle = title.replace(/[\\/:*?"<>|]+/g, " ").trim()
+// the egress machine, whose uploader moves it to Nextcloud. The name is
+// what the lab's GitLab helper reads, the way Teams named recordings:
+// [prefix]-<topic>-<yyyymmdd>_<hhmmss>UTC-Meeting Recording.mp4; {time}
+// here is UTC as 2006-01-02T150405 and the uploader reshapes it.
+function autoRecording(name: string, metadata: RoomMetadata) {
+  const safe = (text: string) =>
+    text
+      .replace(/[\\/:*?"<>|\[\]-]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+  const subject = `[${safe(metadata.prefix) || name}]-${safe(metadata.title) || name}`
   return new RoomEgress({
     room: new RoomCompositeEgressRequest({
       roomName: name,
       layout: "grid",
       fileOutputs: [
         new EncodedFileOutput({
-          filepath: `/out/recordings/${safeTitle} ${name} {time}.mp4`,
+          filepath: `/out/recordings/${subject}-{time}.mp4`,
         }),
       ],
     }),
@@ -97,7 +114,7 @@ export async function createRoom(name: string, metadata: RoomMetadata) {
     emptyTimeout: 10 * 60,
     departureTimeout: 60,
     maxParticipants: 50,
-    egress: autoRecording(name, metadata.title),
+    egress: autoRecording(name, metadata),
   })
 }
 
