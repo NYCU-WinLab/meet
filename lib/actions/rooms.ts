@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm"
 import { z } from "zod"
 
 import { defineAction } from "@/lib/actions/define"
+import { emitErrorLog } from "@/lib/otel"
 import { projectGroups } from "@/lib/portal"
 import { db } from "@/lib/db"
 import { user } from "@/lib/db/schema"
@@ -59,7 +60,7 @@ export const createRoomAction = defineAction({
   name: "create_room",
   title: "開會議室",
   description:
-    "Opens a new meeting room with a title and returns its name and link (https://meet.winlab.tw/r/<name>). Share the link; any lab member can join. The room records itself; group (a slug from list_groups) files the recording under that project in GitLab, otherwise under the member's own username.",
+    "Opens a new meeting room with a title and returns its name and link (https://meet.winlab.tw/r/<name>). Share the link; any lab member can join. The room records itself; group (a slug from list_groups) files the recording under that project in GitLab, otherwise under the member's own username. booking, optional, is the portal room-booking id the meeting was booked with.",
   kind: "mutation",
   input: z.object({
     title: z
@@ -68,17 +69,32 @@ export const createRoomAction = defineAction({
       .min(1, "請填會議名稱")
       .max(40, "會議名稱最多 40 字"),
     group: z.string().trim().max(64).optional(),
+    booking: z
+      .string()
+      .regex(/^room-booking-(?:[0-9a-f]){12}$/, "預約編號格式不對")
+      .optional(),
   }),
   run: async (actor, input) => {
     const me = await member(actor.userId)
-    let prefix = me.username ?? me.id
     if (input.group) {
       const group = (await projectGroups()).find((g) => g.name === input.group)
       if (!group) throw new Error("沒有這個專案群組")
-      prefix = group.name
+    }
+    if (!me.username) {
+      // The helper files such a recording as unassigned.
+      emitErrorLog(new Error("member has no username"), {
+        action: "create_room",
+        userId: me.id,
+      })
     }
     const name = newRoomName()
-    await createRoom(name, { title: input.title, createdBy: me.name, prefix })
+    await createRoom(name, {
+      title: input.title,
+      createdBy: me.name,
+      opener: me.username ?? "",
+      group: input.group ?? "",
+      booking: input.booking ?? "",
+    })
     return { name, url: `${process.env.BETTER_AUTH_URL}/r/${name}` }
   },
 })

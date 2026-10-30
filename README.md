@@ -82,6 +82,25 @@ webhook:
 | `create_room` | Opens a room and returns its link |
 | `end_room` | Closes a room for everyone |
 
+## Recording
+
+Every room records itself: LiveKit Egress composes the grid into an MP4 from the moment the room opens until it closes. The file lands on the egress machine, whose uploader moves it to Nextcloud and hands it to the lab's GitLab helper (winlab-helper). The helper never parses titles; the fields it needs ride in the file name, separated by `~`, a character no id contains:
+
+```
+meet~<room>~<time>~<group>~<opener>~<booking>~<title>.mp4
+```
+
+| Field | What it is |
+|---|---|
+| `room` | The room name, the id in its link |
+| `time` | When the recording started, UTC, `2006-01-02T150405` |
+| `group` | The portal project group's slug, spelled as portal does; empty for a personal meeting |
+| `opener` | The username of the member who opened the room; empty when the account has none |
+| `booking` | The portal `room-booking-…` id the room was opened for, or empty |
+| `title` | The room title, with `/ \ : * ? " < > \| ~` and control characters removed |
+
+An id outside `[A-Za-z0-9._-]{1,64}` is written as empty, never refused. The uploader maps these to the helper's trigger variables (`MEET_ROOM`, `START_TIME`, `GROUP_NAME`, `PERSON`, `BOOKING_REQUEST_ID`, `SUBJECT`); that contract is documented in winlab-helper.
+
 ## Develop
 
 ```sh

@@ -28,11 +28,20 @@ const api = () =>
 /** What a room carries besides its name, set when it is created. */
 export type RoomMetadata = {
   title: string
+  /** The opener's display name, for the room list. */
   createdBy: string
-  /** What the recording is filed under: a project group's slug, or the
-   * opener's username. */
-  prefix: string
+  /** The opener's username; "" when the account has none. */
+  opener: string
+  /** The portal project group's slug the recording is filed under, as
+   * portal spells it; "" for a personal meeting. */
+  group: string
+  /** The portal room-booking id the room was opened for, or "". */
+  booking: string
 }
+
+/** What the recording is filed under: the group, else the opener. */
+export const filedUnder = (metadata: RoomMetadata) =>
+  metadata.group || metadata.opener
 
 export type RoomSummary = {
   name: string
@@ -49,10 +58,12 @@ function parseMetadata(raw: string): RoomMetadata {
     return {
       title: String(data.title ?? ""),
       createdBy: String(data.createdBy ?? ""),
-      prefix: String(data.prefix ?? ""),
+      opener: String(data.opener ?? ""),
+      group: String(data.group ?? ""),
+      booking: String(data.booking ?? ""),
     }
   } catch {
-    return { title: "", createdBy: "", prefix: "" }
+    return { title: "", createdBy: "", opener: "", group: "", booking: "" }
   }
 }
 
@@ -67,7 +78,7 @@ export async function listRooms(): Promise<RoomSummary[]> {
       return {
         name: room.name,
         title: metadata.title || room.name,
-        prefix: metadata.prefix,
+        prefix: filedUnder(metadata),
         createdBy: metadata.createdBy,
         createdAt: new Date(Number(room.creationTime) * 1000),
         participants: participants
@@ -83,25 +94,40 @@ export async function listRooms(): Promise<RoomSummary[]> {
 /** Opens a room that stays up to 10 minutes while empty. */
 // Every room records itself: the egress service composes the grid into an
 // MP4 the moment the room starts and stops when it ends. The file lands on
-// the egress machine, whose uploader moves it to Nextcloud. The name is
-// what the lab's GitLab helper reads, the way Teams named recordings:
-// [prefix]-<topic>-<yyyymmdd>_<hhmmss>UTC-Meeting Recording.mp4; {time}
-// here is UTC as 2006-01-02T150405 and the uploader reshapes it.
+// the egress machine, whose uploader moves it to Nextcloud and hands the
+// fields in the name to the lab's GitLab helper (see README, Recording):
+// meet~<room>~{time}~<group>~<opener>~<booking>~<title>.mp4. "~" separates
+// because no id contains it; {time} is UTC as 2006-01-02T150405, filled in
+// by egress. An id that does not fit the pattern is filed as "" rather
+// than stopping the room from opening.
+const idPattern = /^[A-Za-z0-9._-]{1,64}$/
+const safeId = (id: string) => (idPattern.test(id) ? id : "")
+const safeTitle = (title: string) =>
+  title
+    .replace(/[\\/:*?"<>|~\x00-\x1f\x7f]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+
+export function recordingPath(name: string, metadata: RoomMetadata) {
+  const fields = [
+    "meet",
+    safeId(name),
+    "{time}",
+    safeId(metadata.group),
+    safeId(metadata.opener),
+    safeId(metadata.booking),
+    safeTitle(metadata.title) || name,
+  ]
+  return `/out/recordings/${fields.join("~")}.mp4`
+}
+
 function autoRecording(name: string, metadata: RoomMetadata) {
-  const safe = (text: string) =>
-    text
-      .replace(/[\\/:*?"<>|\[\]-]+/g, " ")
-      .replace(/\s+/g, " ")
-      .trim()
-  const subject = `[${safe(metadata.prefix) || name}]-${safe(metadata.title) || name}`
   return new RoomEgress({
     room: new RoomCompositeEgressRequest({
       roomName: name,
       layout: "grid",
       fileOutputs: [
-        new EncodedFileOutput({
-          filepath: `/out/recordings/${subject}-{time}.mp4`,
-        }),
+        new EncodedFileOutput({ filepath: recordingPath(name, metadata) }),
       ],
     }),
   })
