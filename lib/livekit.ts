@@ -53,6 +53,11 @@ export type RoomSummary = {
   participants: { identity: string; name: string }[]
 }
 
+/** A member in the room: not egress, not an agent, and not the hidden
+ * summary participant that sits in every room. */
+const isMember = (p: { kind?: number; permission?: { hidden?: boolean } }) =>
+  (p.kind === 0 || p.kind === undefined) && !p.permission?.hidden
+
 function parseMetadata(raw: string): RoomMetadata {
   try {
     const data = JSON.parse(raw) as Partial<RoomMetadata>
@@ -148,7 +153,7 @@ export async function createRoom(name: string, metadata: RoomMetadata) {
 /** Members in a room now (not egress, not agents). */
 export async function memberCount(name: string) {
   const participants = await api().room.listParticipants(name)
-  return participants.filter((p) => p.kind === 0 || p.kind === undefined).length
+  return participants.filter(isMember).length
 }
 
 /** Starts the room's recording unless one is already running. */
