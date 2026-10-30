@@ -2,8 +2,8 @@ import { AppShell } from "@/components/app-shell"
 import { LiveRefresh } from "@/components/live-refresh"
 import { getSession } from "@/lib/auth/session"
 
-// Meet's corners: the lab and the page in the breadcrumb, the member's
-// account in the top right, the build in the bottom left.
+// Meet's corners: the lab and the page in the breadcrumb, the dashboard in
+// the top right (登入 when signed out), the build in the bottom left.
 export async function MeetShell({
   page,
   layout,
@@ -33,14 +33,9 @@ export async function MeetShell({
       ]}
       footer={footer}
       corners={topRight ? { topRight } : undefined}
+      nav={session ? [{ label: "儀表板", href: "/dashboard", tip: "" }] : []}
       account={
-        session
-          ? {
-              label: session.user.name,
-              href: "https://portal.winlab.tw/members",
-              tip: session.user.email,
-            }
-          : { label: "登入", href: "/sign-in", tip: "" }
+        session ? undefined : { label: "登入", href: "/sign-in", tip: "" }
       }
     >
       {live && <LiveRefresh />}

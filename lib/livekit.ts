@@ -106,6 +106,12 @@ export async function getRoom(name: string) {
   return room ?? null
 }
 
+/** How many recordings are running right now. */
+export async function activeRecordings() {
+  const list = await api().egress.listEgress({ active: true })
+  return list.length
+}
+
 /** Disconnects everyone and closes the room. */
 export async function deleteRoom(name: string) {
   await api().room.deleteRoom(name)

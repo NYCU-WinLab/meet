@@ -5,6 +5,7 @@ import {
   joinRoom,
   listRooms,
 } from "@/lib/actions/rooms"
+import { dashboard } from "@/lib/actions/dashboard"
 import { whoami } from "@/lib/actions/users"
 
 /** Every action, in the order MCP lists them. */
@@ -14,4 +15,5 @@ export const actions: Action[] = [
   createRoomAction,
   joinRoom,
   endRoom,
+  dashboard,
 ]
