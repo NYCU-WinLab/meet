@@ -108,7 +108,10 @@ export async function summarize(
   const list = (value: unknown) =>
     Array.isArray(value) ? value.map(String).filter(Boolean) : []
   return {
-    summary: String(parsed.summary ?? ""),
+    // The model sometimes answers the summary as a list of sentences.
+    summary: Array.isArray(parsed.summary)
+      ? parsed.summary.map(String).join("")
+      : String(parsed.summary ?? ""),
     questions: list(parsed.questions),
     improvements: list(parsed.improvements),
     decisions: list(parsed.decisions),
