@@ -8,6 +8,9 @@ import {
   LiveKitAPI,
   WebhookReceiver,
   type WebhookEvent,
+  EncodedFileOutput,
+  RoomCompositeEgressRequest,
+  RoomEgress,
 } from "livekit-server-sdk"
 
 const url = () => process.env.LIVEKIT_URL!
@@ -69,6 +72,24 @@ export async function listRooms(): Promise<RoomSummary[]> {
 }
 
 /** Opens a room that stays up to 10 minutes while empty. */
+// Every room records itself: the egress service composes the grid into an
+// MP4 the moment the room starts and stops when it ends. The file lands on
+// the egress machine, whose uploader moves it to Nextcloud.
+function autoRecording(name: string, title: string) {
+  const safeTitle = title.replace(/[\\/:*?"<>|]+/g, " ").trim()
+  return new RoomEgress({
+    room: new RoomCompositeEgressRequest({
+      roomName: name,
+      layout: "grid",
+      fileOutputs: [
+        new EncodedFileOutput({
+          filepath: `/out/recordings/${safeTitle} ${name} {time}.mp4`,
+        }),
+      ],
+    }),
+  })
+}
+
 export async function createRoom(name: string, metadata: RoomMetadata) {
   await api().room.createRoom({
     name,
@@ -76,6 +97,7 @@ export async function createRoom(name: string, metadata: RoomMetadata) {
     emptyTimeout: 10 * 60,
     departureTimeout: 60,
     maxParticipants: 50,
+    egress: autoRecording(name, metadata.title),
   })
 }
 
