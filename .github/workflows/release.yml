@@ -47,7 +47,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  captions:
+  summary:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -60,16 +60,16 @@ jobs:
       - id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/nycu-winlab/meet-captions
+          images: ghcr.io/nycu-winlab/meet-summary
           tags: |
             type=sha,prefix=sha-
             type=raw,value=main
       - uses: docker/build-push-action@v6
         with:
-          context: captions
+          context: summary
           platforms: linux/amd64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=captions
-          cache-to: type=gha,mode=max,scope=captions
+          cache-from: type=gha,scope=summary
+          cache-to: type=gha,mode=max,scope=summary

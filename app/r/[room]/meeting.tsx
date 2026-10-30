@@ -10,13 +10,13 @@ import {
   useRoomContext,
   useTrackToggle,
   useTracks,
-  useTranscriptions,
   VideoTrack,
   type TrackReferenceOrPlaceholder,
 } from "@livekit/components-react"
 import { Track } from "livekit-client"
 import {
   LinkIcon,
+  ListChecksIcon,
   LogOutIcon,
   MicIcon,
   MessageSquareIcon,
@@ -58,7 +58,10 @@ export function Meeting({
   token: string
 }) {
   const router = useRouter()
-  const [chatOpen, setChatOpen] = React.useState(false)
+  const [panel, setPanel] = React.useState<Panel>(null)
+  const [summary, setSummary] = React.useState<Summary | null>(null)
+  const toggle = (name: Panel) =>
+    setPanel((open) => (open === name ? null : name))
   return (
     <LiveKitRoom
       serverUrl={serverUrl}
@@ -72,27 +75,22 @@ export function Meeting({
       className="fixed top-18 right-6 bottom-6 left-6 flex flex-col gap-6 md:top-22 md:flex-row"
     >
       <RoomAudioRenderer />
-      {/* A phone shows the chat instead of the stage; wider screens show both. */}
+      <SummaryListener onSummary={setSummary} />
+      {/* A phone shows the open panel instead of the stage; wider screens show both. */}
       <div
         className={cn(
           "min-h-0 min-w-0 flex-1 flex-col",
-          chatOpen ? "hidden md:flex" : "flex"
+          panel ? "hidden md:flex" : "flex"
         )}
       >
         <Stage />
-        <Captions />
       </div>
-      {chatOpen && <Chat />}
+      {panel === "chat" && <Chat />}
+      {panel === "summary" && <SummaryPanel summary={summary} />}
       <div className="flex justify-center md:hidden">
-        <Controls
-          chatOpen={chatOpen}
-          onChatToggle={() => setChatOpen((open) => !open)}
-        />
+        <Controls panel={panel} onToggle={toggle} />
       </div>
-      <ControlsInCorner
-        chatOpen={chatOpen}
-        onChatToggle={() => setChatOpen((open) => !open)}
-      />
+      <ControlsInCorner panel={panel} onToggle={toggle} />
     </LiveKitRoom>
   )
 }
@@ -258,12 +256,14 @@ function ControlsInCorner(props: React.ComponentProps<typeof Controls>) {
   return slot ? createPortal(<Controls {...props} />, slot) : null
 }
 
+type Panel = "chat" | "summary" | null
+
 function Controls({
-  chatOpen,
-  onChatToggle,
+  panel,
+  onToggle,
 }: {
-  chatOpen: boolean
-  onChatToggle: () => void
+  panel: Panel
+  onToggle: (name: Panel) => void
 }) {
   const room = useRoomContext()
   const { isMicrophoneEnabled, isCameraEnabled, isScreenShareEnabled } =
@@ -310,11 +310,18 @@ function Controls({
           {isScreenShareEnabled ? <MonitorXIcon /> : <MonitorUpIcon />}
         </Control>
         <Control
-          label={chatOpen ? "收起聊天" : "聊天"}
-          active={chatOpen}
-          onClick={onChatToggle}
+          label={panel === "chat" ? "收起聊天" : "聊天"}
+          active={panel === "chat"}
+          onClick={() => onToggle("chat")}
         >
           <MessageSquareIcon />
+        </Control>
+        <Control
+          label={panel === "summary" ? "收起摘要" : "摘要"}
+          active={panel === "summary"}
+          onClick={() => onToggle("summary")}
+        >
+          <ListChecksIcon />
         </Control>
         <Tooltip>
           <TooltipTrigger
@@ -388,50 +395,74 @@ function Control({
   )
 }
 
-// Text beside the video: what was said while the meeting is open; nothing is
-// kept once it ends.
-// Live captions from the captions service: the last line each speaker said,
-// partials replaced in place by their finals. Older lines fall off after a
-// while so the stage stays readable.
-function Captions() {
+// The running summary the summary service publishes on its text stream:
+// what the meeting is about, open questions, improvements, decisions. It is
+// rewritten every minute or so and sent again to anyone who joins late.
+type Summary = {
+  summary: string
+  questions: string[]
+  improvements: string[]
+  decisions: string[]
+  updatedAt: string
+}
+
+function SummaryListener({
+  onSummary,
+}: {
+  onSummary: (summary: Summary) => void
+}) {
   const room = useRoomContext()
-  const segments = useTranscriptions({ room })
-  const [now, setNow] = React.useState(() => Date.now())
   React.useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(timer)
-  }, [])
-  const lines = React.useMemo(() => {
-    const latest = new Map<string, { name: string; text: string; at: number }>()
-    for (const segment of segments) {
-      const speaker =
-        segment.streamInfo.attributes?.["meet.speaker"] ??
-        segment.participantInfo?.identity ??
-        "?"
-      const name = room.getParticipantByIdentity(speaker)?.name || speaker
-      latest.set(speaker, {
-        name,
-        text: segment.text,
-        at: segment.streamInfo.timestamp,
-      })
-    }
-    return [...latest.values()]
-      .filter((line) => now - line.at < 8000)
-      .sort((a, b) => a.at - b.at)
-      .slice(-3)
-  }, [segments, room, now])
-  if (lines.length === 0) return null
+    room.registerTextStreamHandler("meet.summary", async (reader) => {
+      try {
+        onSummary(JSON.parse(await reader.readAll()) as Summary)
+      } catch {
+        // A summary we cannot read is not worth breaking the meeting for.
+      }
+    })
+    return () => room.unregisterTextStreamHandler("meet.summary")
+  }, [room, onSummary])
+  return null
+}
+
+function SummaryPanel({ summary }: { summary: Summary | null }) {
   return (
-    <div className="pointer-events-none mt-6 flex flex-col items-center gap-2">
-      {lines.map((line) => (
-        <p
-          key={line.name}
-          className="max-w-3xl rounded-control bg-overlay px-4 py-2 text-center text-body backdrop-blur-md"
-        >
-          <span className="text-muted-foreground">{line.name}</span> {line.text}
-        </p>
-      ))}
-    </div>
+    <aside className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto rounded-control bg-muted p-4 md:w-80 md:flex-none">
+      {!summary ? (
+        <p className="text-muted-foreground">開始說話後約 1 分鐘出現摘要</p>
+      ) : (
+        <>
+          <p className="break-words whitespace-pre-wrap">{summary.summary}</p>
+          <SummaryList title="問題" items={summary.questions} />
+          <SummaryList title="改進" items={summary.improvements} />
+          <SummaryList title="決議" items={summary.decisions} />
+          <p className="text-muted-foreground">
+            更新於{" "}
+            {new Date(summary.updatedAt).toLocaleTimeString("zh-TW", {
+              hour12: false,
+              hour: "2-digit",
+              minute: "2-digit",
+            })}
+          </p>
+        </>
+      )}
+    </aside>
+  )
+}
+
+function SummaryList({ title, items }: { title: string; items: string[] }) {
+  if (items.length === 0) return null
+  return (
+    <section className="flex flex-col gap-2">
+      <h2 className="text-muted-foreground">{title}</h2>
+      <ul className="flex list-disc flex-col gap-1 pl-5">
+        {items.map((item) => (
+          <li key={item} className="break-words">
+            {item}
+          </li>
+        ))}
+      </ul>
+    </section>
   )
 }
 
