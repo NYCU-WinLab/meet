@@ -13,8 +13,9 @@ export function proxy(request: NextRequest) {
 export const config = {
   // Open: sign-in and consent (they handle their own state), the auth and
   // MCP endpoints (they answer with OAuth errors, not redirects), the LiveKit
-  // webhook (it checks its own signature), discovery documents and static files.
+  // webhook (it checks its own signature), the service actions (they check
+  // their own key), discovery documents and static files.
   matcher: [
-    "/((?!(?:sign-in|consent|api/auth|api/livekit|mcp|\\.well-known|_next/static|_next/image)(?:/|$)|icon\\.png$|apple-icon\\.png$).*)",
+    "/((?!(?:sign-in|consent|api/auth|api/livekit|api/actions|mcp|\\.well-known|_next/static|_next/image)(?:/|$)|icon\\.png$|apple-icon\\.png$).*)",
   ],
 }
