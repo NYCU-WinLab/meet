@@ -8,6 +8,8 @@ COPY src ./src
 RUN bun run build && rm -rf node_modules && bun install --frozen-lockfile --production
 
 FROM node:24-slim
+# rtc-node's native transport needs the system root CAs to reach wss://.
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 ENV NODE_ENV=production TZ=Asia/Taipei
 COPY --from=build /app/node_modules ./node_modules
