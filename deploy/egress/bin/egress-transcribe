@@ -1,0 +1,163 @@
+#!/bin/bash
+# Turns uploaded recordings into transcripts: egress-upload leaves one
+# <name>.pending file per recording it sent to Nextcloud and to transcribe;
+# this script checks those jobs and, when one is done, puts the transcript
+# (txt, srt) and the meeting notes next to the MP4 in Nextcloud.
+set -u
+. /etc/egress-upload.env
+STATE=/var/lib/egress-transcribe
+AUTH="$NC_USER:$NC_PASS"
+DAV="$NC_URL/remote.php/dav/files/$NC_USER"
+TX=${TX_URL:-https://transcribe.winlab.tw}
+shopt -s nullglob
+
+# Renders the meeting-notes JSON on stdin as Markdown.
+read -r -d '' RENDER_NOTES <<'PY'
+import json, sys
+notes = json.load(sys.stdin).get("content")
+if not notes:
+    sys.exit(1)
+stem = sys.argv[1]
+out = [f"# {notes.get('title') or stem}", ""]
+if notes.get("summary"):
+    out += [notes["summary"], ""]
+labels = [("discussion_items", "討論"), ("student_updates", "進度"), ("decisions", "決議"),
+          ("action_items", "待辦"), ("open_questions", "待釐清"), ("next_milestones", "下一步"),
+          ("experiments_discussed", "實驗"), ("papers_cited", "提到的論文"), ("models_mentioned", "模型"),
+          ("resources_needed", "需要的資源"), ("metrics", "數據")]
+for key, label in labels:
+    items = notes.get(key) or []
+    if not items:
+        continue
+    out += [f"## {label}", ""]
+    for item in items:
+        if isinstance(item, dict):
+            head = item.get("topic") or item.get("text") or item.get("title") or item.get("item") or item.get("name")
+            body = item.get("summary") or item.get("detail") or item.get("description")
+            if not head and not body:
+                head = json.dumps(item, ensure_ascii=False)
+            text = f"{head}：{body}" if head and body else (head or body)
+            who = item.get("owner") or item.get("assignee") or item.get("student")
+            text = f"{text}({who})" if who else text
+            if item.get("timestamp"):
+                text = f"{item['timestamp']} {text}"
+        else:
+            text = str(item)
+        out.append(f"- {text}")
+    out.append("")
+print("\n".join(out))
+PY
+
+urlencode() { python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1]))' "$1"; }
+tx() { curl -g -sS -H "Authorization: Bearer $TX_TOKEN" "$@"; }
+put() { # put <local> <remote path under NC_DIR>
+  local code
+  code=$(curl -g -sS -o /dev/null -w "%{http_code}" -u "$AUTH" -T "$1" "$DAV/$NC_DIR/$2")
+  [ "$code" = 201 ] || [ "$code" = 204 ]
+}
+
+# Burns the subtitles into the MP4 as a soft track (mov_text, toggleable in
+# players) and replaces the copy in Nextcloud. The hand-off to the helper
+# follows; until it answers 201 the pending file and the MP4 stay, and the
+# next run tries again (the helper dedups by SHA-256, so repeats are safe).
+finish() { # <pending> <job> <folder> <stem> <srt>
+  local pending=$1 job=$2 folder=$3 stem=$4 srt=$5 mp4="$STATE/$2.mp4"
+  if [ -f "$mp4" ] && [ -s "$srt" ] && command -v ffmpeg >/dev/null; then
+    if ffmpeg -nostdin -loglevel error -y -i "$mp4" -i "$srt" -map 0 -map 1 -c copy -c:s mov_text -metadata:s:s:0 language=zho "$mp4.sub.mp4" \
+       && put "$mp4.sub.mp4" "$folder/$(urlencode "$stem").mp4"; then
+      echo "subtitled: $stem"; mv -f "$mp4.sub.mp4" "$mp4"
+    else
+      echo "subtitle mux failed, keeping the plain MP4: $stem" >&2; rm -f "$mp4.sub.mp4"
+    fi
+  fi
+  echo "finished=1" >> "$pending"
+  hand_off "$pending" && rm -f "$mp4" "$pending"
+}
+
+# The lab's GitLab helper (winlab-helper) files a recording under its project
+# group from the fields meet put in the file name, never from the title. It is
+# handed a download URL and fetches the file itself: a public share of the
+# finished MP4 that dies after 6 days (Nextcloud caps links at 7). The trigger goes to teams-meeting-bot
+# (project 177), whose forward_recording job relays it to winlab-helper.
+# Values go with --form-string: curl's --form reads a file when a value
+# starts with @ or <, and a title may.
+hand_off() { # <pending>; needs job, folder, stem, room, egress, start, end, group, person, booking, subject, share, secret
+  local pending=$1 mp4="$STATE/$job.mp4" size sha
+  [ -n "${GL_TRIGGER_TOKEN:-}" ] && [ -n "${GL_TRIGGER_URL:-}" ] || return 0
+  [ -f "$mp4" ] || { echo "no local MP4 to hand off: $stem" >&2; return 0; }
+  size=$(stat -c %s "$mp4"); sha=$(sha256sum "$mp4" | cut -c1-64)
+  # Under about 5 MB the helper only stores it anyway.
+  [ "$size" -ge 5000000 ] || { echo "too small for the helper, skipped: $stem ($size bytes)"; return 0; }
+  if [ -z "${share:-}" ]; then
+    # Nextcloud insists on a password for link shares, so the link is the
+    # public WebDAV endpoint with the share token and password as its user info.
+    secret=$(head -c 12 /dev/urandom | od -An -tx1 | tr -d ' \n')
+    share=$(curl -g -sS -u "$NC_USER:$NC_PASS" -H "OCS-APIRequest: true" \
+      -X POST "$NC_URL/ocs/v2.php/apps/files_sharing/api/v1/shares?format=json" \
+      --data-urlencode "path=/$NC_DIR/$folder/$stem.mp4" --data-urlencode "shareType=3" \
+      --data-urlencode "permissions=1" --data-urlencode "password=$secret" \
+      --data-urlencode "expireDate=$(date -d '+6 days' +%F)" \
+      | python3 -c 'import json,sys; print(json.load(sys.stdin)["ocs"]["data"]["token"])' 2>/dev/null)
+    [ -n "$share" ] || { echo "share failed, helper not told yet: $stem" >&2; return 1; }
+    printf 'share=%q\nsecret=%q\n' "$share" "$secret" >> "$pending"
+  fi
+  local code
+  code=$(curl -g -sS -o /dev/null -w "%{http_code}" -X POST "$GL_TRIGGER_URL" \
+    --form-string "token=$GL_TRIGGER_TOKEN" --form-string "ref=${GL_TRIGGER_REF:-main}" \
+    --form-string "variables[ACTION]=recording" \
+    --form-string "variables[MEET_ROOM]=${room:-}" \
+    --form-string "variables[MEET_EGRESS_ID]=${egress:-}" \
+    --form-string "variables[DL_URL]=${NC_URL/:\/\//:\/\/$share:$secret@}/public.php/webdav/" \
+    --form-string "variables[NC_SIZE]=$size" \
+    --form-string "variables[NC_SHA256]=$sha" \
+    --form-string "variables[NC_NAME]=$stem.mp4" \
+    --form-string "variables[SUBJECT]=${subject:-$stem}" \
+    --form-string "variables[PERSON]=${person:-}" \
+    --form-string "variables[GROUP_NAME]=${group:-}" \
+    --form-string "variables[START_TIME]=${start:-}" \
+    --form-string "variables[END_TIME]=${end:-}" \
+    --form-string "variables[BOOKING_REQUEST_ID]=${booking:-}")
+  if [ "$code" = 201 ]; then echo "helper told: $stem.mp4 ($size bytes)"; return 0; fi
+  echo "helper trigger -> $code, will retry: $stem" >&2; return 1
+}
+
+for pending in "$STATE"/*.pending; do
+  unset job folder stem room egress start end group person booking subject sha notes_asked finished share secret
+  . "$pending"   # job, folder, stem, the recording's fields, maybe notes_asked / finished / share
+  [ -n "${job:-}" ] && [ -n "${stem:-}" ] || { echo "bad state file: $pending" >&2; continue; }
+  if [ -n "${finished:-}" ]; then hand_off "$pending" && rm -f "$STATE/$job.mp4" "$pending"; continue; fi
+  stage=$(tx "$TX/api/jobs/$job" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("stage",""))' 2>/dev/null)
+  case "$stage" in
+    done) ;;
+    error) echo "transcribe failed: $stem ($job)" >&2; mv "$pending" "${pending%.pending}.failed"; rm -f "$STATE/$job.mp4"; continue ;;
+    *) continue ;;
+  esac
+  tmp=$(mktemp -d)
+  # A recording with no speech has an empty transcript: nothing to put next
+  # to it, the hand-off still happens.
+  if tx -o "$tmp/t.txt" "$TX/api/jobs/$job/transcript.txt" && [ ! -s "$tmp/t.txt" ]; then
+    echo "no speech: $stem"; : > "$tmp/t.srt"; finish "$pending" "$job" "$folder" "$stem" "$tmp/t.srt"; rm -rf "$tmp"; continue
+  fi
+  ok=1
+  for ext in txt srt; do
+    tx -o "$tmp/t.$ext" "$TX/api/jobs/$job/transcript.$ext" && [ -s "$tmp/t.$ext" ] || { ok=0; break; }
+    put "$tmp/t.$ext" "$folder/$(urlencode "$stem").$ext" || ok=0
+  done
+  if [ "$ok" = 1 ]; then
+    # Meeting notes come from a second, slower job; ask once, collect later.
+    if [ -z "${notes_asked:-}" ]; then
+      tx -X POST -H 'content-type: application/json' -d '{"meeting_type":"lab_meeting"}' -o /dev/null "$TX/api/jobs/$job/meeting-notes"
+      echo "notes_asked=1" >> "$pending"
+      rm -rf "$tmp"; continue
+    fi
+    tx "$TX/api/jobs/$job/meeting-notes" | python3 -c "$RENDER_NOTES" "$stem" > "$tmp/notes.md" 2>/dev/null
+    if [ -s "$tmp/notes.md" ]; then
+      put "$tmp/notes.md" "$folder/$(urlencode "$stem").notes.md" && { echo "transcribed: $stem"; finish "$pending" "$job" "$folder" "$stem" "$tmp/t.srt"; }
+    elif [ "$(( $(date +%s) - $(stat -c %Y "$pending") ))" -gt 1800 ]; then
+      echo "no meeting notes after 30 min: $stem" >&2; finish "$pending" "$job" "$folder" "$stem" "$tmp/t.srt"
+    fi
+  else
+    echo "transcript fetch or upload failed: $stem" >&2
+  fi
+  rm -rf "$tmp"
+done
