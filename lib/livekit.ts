@@ -104,8 +104,8 @@ export async function listRooms(): Promise<RoomSummary[]> {
   return summaries.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
 }
 
-// A room records itself from the moment a second member is in it (the
-// webhook starts the egress) until it closes: the egress service composes
+// A room records itself from the moment a member is in it (the webhook
+// starts the egress) until it closes: the egress service composes
 // the grid into an MP4. The file lands on the egress machine, whose
 // uploader moves it to Nextcloud and hands the fields in the name to the
 // lab's GitLab helper (see README, Recording):

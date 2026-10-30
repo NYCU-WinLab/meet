@@ -26,8 +26,9 @@ export async function POST(request: Request) {
     return new Response(null, { status: 401 })
   }
   await recordEvent(event).catch(() => {})
-  // One member in a room is not a meeting: the recording starts when the
-  // second one arrives, and runs until the room closes.
+  // The recording starts with the first member (one person recording alone
+  // is a meeting too; the hidden summary bot is not) and runs until the
+  // room closes.
   if (
     event.event === "participant_joined" &&
     event.room &&
@@ -35,7 +36,7 @@ export async function POST(request: Request) {
   ) {
     const room = event.room
     try {
-      if ((await memberCount(room.name)) >= 2)
+      if ((await memberCount(room.name)) >= 1)
         await startRecording(room.name, room.metadata)
     } catch (error) {
       emitErrorLog(error, { room: room.name, step: "start recording" })

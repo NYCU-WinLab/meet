@@ -86,7 +86,7 @@ webhook:
 
 ## Recording
 
-Every room records itself: LiveKit Egress composes the grid into an MP4 from the moment a second member is in the room until it closes (one member alone is not a meeting). The file lands on the egress machine, whose uploader moves it to Nextcloud and hands it to the lab's GitLab helper (winlab-helper). The helper never parses titles; the fields it needs ride in the file name, separated by `~`, a character no id contains:
+Every room records itself: LiveKit Egress composes the grid into an MP4 from the moment the first member is in the room until it closes. The file lands on the egress machine, whose uploader moves it to Nextcloud and hands it to the lab's GitLab helper (winlab-helper). The helper never parses titles; the fields it needs ride in the file name, separated by `~`, a character no id contains:
 
 ```
 meet~<room>~<time>~<group>~<opener>~<booking>~<until>~<title>.mp4
