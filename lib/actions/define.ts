@@ -7,7 +7,13 @@ import { traced } from "@/lib/otel"
  * Who is acting: the signed-in member, and whether through a page or an
  * MCP client (recorded on the action's span).
  */
-export type Actor = { userId: string; via: "web" | "mcp" }
+export type Actor = {
+  userId: string
+  via: "web" | "mcp" | "service"
+  /** Set when a trusted service (portal) calls /api/actions with its key;
+   * userId is then empty and the action names the member itself. */
+  service?: string
+}
 
 /**
  * Every read and write meet does is one of these, defined once. Pages

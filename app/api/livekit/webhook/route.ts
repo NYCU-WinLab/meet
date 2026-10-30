@@ -1,6 +1,7 @@
 import { announceChange } from "@/lib/actions/changes"
 import { recordEvent } from "@/lib/actions/events"
-import { receiveWebhook } from "@/lib/livekit"
+import { memberCount, receiveWebhook, startRecording } from "@/lib/livekit"
+import { emitErrorLog } from "@/lib/otel"
 
 // The LiveKit server posts here when a room opens or closes and when
 // someone joins or leaves, and when a recording starts or ends, signed with
@@ -25,6 +26,21 @@ export async function POST(request: Request) {
     return new Response(null, { status: 401 })
   }
   await recordEvent(event).catch(() => {})
+  // One member in a room is not a meeting: the recording starts when the
+  // second one arrives, and runs until the room closes.
+  if (
+    event.event === "participant_joined" &&
+    event.room &&
+    !event.participant?.kind
+  ) {
+    const room = event.room
+    try {
+      if ((await memberCount(room.name)) >= 2)
+        await startRecording(room.name, room.metadata)
+    } catch (error) {
+      emitErrorLog(error, { room: room.name, step: "start recording" })
+    }
+  }
   if (announced.has(event.event))
     await announceChange(`livekit:${event.event}`).catch(() => {})
   return new Response(null, { status: 204 })
