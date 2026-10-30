@@ -18,6 +18,7 @@ jobs:
       - run: bun run tokens:check
       - run: bun run actions:check
       - run: bun run build
+      - run: cd captions && bun install --frozen-lockfile && bun run typecheck
 
   # The image as deployed: compose up with Postgres, migrations, then probe
   # sign-in, the webhook, OAuth discovery and the MCP challenge.
@@ -42,7 +43,7 @@ jobs:
           LIVEKIT_API_KEY=ci
           LIVEKIT_API_SECRET=ci-secret-ci-secret-ci-secret-ci
           ENV
-          docker compose up -d --wait
+          docker compose up -d --wait web
       - name: Probe
         run: |
           docker compose logs migrate | grep -q "migrations applied"

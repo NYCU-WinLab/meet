@@ -45,5 +45,15 @@ services:
       interval: 10s
       retries: 10
 
+  # Live captions: joins every room as a hidden participant and streams each
+  # microphone to the lab's transcribe service. Same LiveKit env as web.
+  # Opt in with `docker compose --profile captions up -d`: the transcribe
+  # service allows one realtime session per caller, so this is off by default.
+  captions:
+    image: ghcr.io/nycu-winlab/meet-captions:${MEET_VERSION:-main}
+    profiles: [captions]
+    restart: unless-stopped
+    env_file: .env
+
 volumes:
   postgres:

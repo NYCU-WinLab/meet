@@ -10,6 +10,7 @@ import {
   useRoomContext,
   useTrackToggle,
   useTracks,
+  useTranscriptions,
   VideoTrack,
   type TrackReferenceOrPlaceholder,
 } from "@livekit/components-react"
@@ -79,6 +80,7 @@ export function Meeting({
         )}
       >
         <Stage />
+        <Captions />
       </div>
       {chatOpen && <Chat />}
       <div className="flex justify-center md:hidden">
@@ -388,6 +390,51 @@ function Control({
 
 // Text beside the video: what was said while the meeting is open; nothing is
 // kept once it ends.
+// Live captions from the captions service: the last line each speaker said,
+// partials replaced in place by their finals. Older lines fall off after a
+// while so the stage stays readable.
+function Captions() {
+  const room = useRoomContext()
+  const segments = useTranscriptions({ room })
+  const [now, setNow] = React.useState(() => Date.now())
+  React.useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(timer)
+  }, [])
+  const lines = React.useMemo(() => {
+    const latest = new Map<string, { name: string; text: string; at: number }>()
+    for (const segment of segments) {
+      const speaker =
+        segment.streamInfo.attributes?.["meet.speaker"] ??
+        segment.participantInfo?.identity ??
+        "?"
+      const name = room.getParticipantByIdentity(speaker)?.name || speaker
+      latest.set(speaker, {
+        name,
+        text: segment.text,
+        at: segment.streamInfo.timestamp,
+      })
+    }
+    return [...latest.values()]
+      .filter((line) => now - line.at < 8000)
+      .sort((a, b) => a.at - b.at)
+      .slice(-3)
+  }, [segments, room, now])
+  if (lines.length === 0) return null
+  return (
+    <div className="pointer-events-none mt-6 flex flex-col items-center gap-2">
+      {lines.map((line) => (
+        <p
+          key={line.name}
+          className="max-w-3xl rounded-control bg-overlay px-4 py-2 text-center text-body backdrop-blur-md"
+        >
+          <span className="text-muted-foreground">{line.name}</span> {line.text}
+        </p>
+      ))}
+    </div>
+  )
+}
+
 function Chat() {
   const { chatMessages, send, isSending } = useChat()
   const { localParticipant } = useLocalParticipant()
