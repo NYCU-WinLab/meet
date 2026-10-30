@@ -1,0 +1,6 @@
+[Unit]
+Description=Move finished egress recordings to Nextcloud
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/egress-upload
+ExecStart=/usr/local/bin/egress-transcribe

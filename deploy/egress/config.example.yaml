@@ -1,0 +1,10 @@
+api_key: <livekit api key>
+api_secret: <livekit api secret>
+ws_url: ws://10.200.14.18:7880
+insecure: true
+redis:
+  address: 10.200.14.18:6379
+health_port: 7981
+prometheus_port: 7982
+logging:
+  level: info

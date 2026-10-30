@@ -1,0 +1,148 @@
+#!/bin/bash
+# Moves finished egress recordings to Nextcloud (WebDAV), then deletes them.
+# A recording is finished when egress has written its EG_*.json manifest.
+# A recording that belongs to a booking (meet~…~<booking>~<until>~…) is held
+# until an hour after the booking ends, then all its parts are joined into
+# one file and shipped as one recording.
+set -u
+. /etc/egress-upload.env
+OUT=/home/user/egress/out/recordings
+HOLD=/var/lib/egress-hold
+AUTH="$NC_USER:$NC_PASS"
+DAV="$NC_URL/remote.php/dav/files/$NC_USER"
+shopt -s nullglob
+
+listed() {
+  python3 - "$1" <<'PY'
+import json, sys, os
+for f in json.load(open(sys.argv[1])).get("files", []):
+    print(os.path.basename(f["filename"]))
+PY
+}
+
+# Prints the recording's fields as shell assignments: room, start, end,
+# group, person, booking, until (epoch seconds of the booking's end, or ""),
+# subject, egress.
+fields() {
+  python3 - "$1" "$2" <<'PY'
+import json, os, re, shlex, sys
+from datetime import datetime, timezone
+name, manifest = sys.argv[1], sys.argv[2]
+stem = name[:-4] if name.endswith(".mp4") else name
+f = dict(room="", start="", end="", group="", person="", booking="", until="", subject=stem,
+         egress=os.path.basename(manifest)[:-5] if manifest.endswith(".json") else "")
+stampre = r"(\d{4}-\d{2}-\d{2})T(\d{2})(\d{2})(\d{2})"
+def iso(s):
+    m = re.fullmatch(stampre, s)
+    return f"{m[1]}T{m[2]}:{m[3]}:{m[4]}Z" if m else ""
+parts = stem.split("~")
+if parts[0] == "meet" and len(parts) >= 7:
+    f["room"], t, f["group"], f["person"], f["booking"] = parts[1:6]
+    rest = parts[6:]
+    if len(rest) >= 2 and (rest[0] == "" or re.fullmatch(stampre, rest[0])):
+        u, rest = rest[0], rest[1:]
+        if u: f["until"] = str(int(datetime.strptime(u, "%Y-%m-%dT%H%M%S").replace(tzinfo=timezone.utc).timestamp()))
+    f["subject"] = "~".join(rest) or f["room"]
+    f["start"] = iso(t)
+try:
+    m = json.load(open(manifest))
+    ts = lambda ns: datetime.fromtimestamp(int(ns) / 1e9, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    if m.get("started_at"): f["start"] = ts(m["started_at"])
+    if m.get("ended_at"): f["end"] = ts(m["ended_at"])
+except Exception:
+    pass
+for k, v in f.items():
+    print(f"{k}={shlex.quote(v)}")
+PY
+}
+
+urlencode() { python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1]))' "$1"; }
+
+# Uploads one file to Nextcloud, hands it to transcribe and removes it.
+# Needs the fields in scope. Returns 1 when the file must stay for a retry.
+ship() { # <local_path> <name>
+  local local_path=$1 name=$2 month sha target code remote job
+  month=$(date -r "$local_path" +%Y-%m)
+  sha=$(sha256sum "$local_path" | cut -c1-64)
+  curl -g -fsS -u "$AUTH" -X MKCOL "$DAV/$NC_DIR/" >/dev/null 2>&1 || true
+  curl -g -fsS -u "$AUTH" -X MKCOL "$DAV/$NC_DIR/$month/" >/dev/null 2>&1 || true
+  target="$DAV/$NC_DIR/$month/$(urlencode "$name")"
+  code=$(curl -g -sS -o /dev/null -w "%{http_code}" -u "$AUTH" -T "$local_path" "$target")
+  if [ "$code" != 201 ] && [ "$code" != 204 ]; then
+    echo "upload failed ($code): $name" >&2; return 1
+  fi
+  remote=$(curl -g -sS -I -u "$AUTH" "$target" | awk 'tolower($1)=="content-length:" {print $2}' | tr -d '\r')
+  if [ "$remote" != "$(stat -c %s "$local_path")" ]; then
+    echo "size mismatch: $name local $(stat -c %s "$local_path") remote $remote" >&2; return 1
+  fi
+  echo "uploaded: $name -> $NC_DIR/$month/"
+  # Hand the recording to transcribe before it goes; egress-transcribe
+  # collects the transcript when the job is done.
+  if [ -n "${TX_TOKEN:-}" ]; then
+    job=$(curl -g -sS -H "Authorization: Bearer $TX_TOKEN" -F "file=@$local_path" -F language=zh -F diarize=true "${TX_URL:-https://transcribe.winlab.tw}/api/jobs" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("job_id",""))' 2>/dev/null)
+    if [ -n "$job" ]; then
+      mkdir -p /var/lib/egress-transcribe
+      printf 'job=%q\nfolder=%q\nstem=%q\nroom=%q\negress=%q\nstart=%q\nend=%q\ngroup=%q\nperson=%q\nbooking=%q\nsubject=%q\nsha=%q\n' \
+        "$job" "$month" "${name%.mp4}" "$room" "$egress" "$start" "$end" "$group" "$person" "$booking" "$subject" "$sha" > "/var/lib/egress-transcribe/$job.pending"
+      mv "$local_path" "/var/lib/egress-transcribe/$job.mp4"
+      echo "transcribe job $job: $name"
+    else
+      echo "transcribe submit failed: $name" >&2
+    fi
+  fi
+  rm -f "$local_path"
+  return 0
+}
+
+# New recordings: ship at once, or hold the parts of a booking.
+for manifest in "$OUT"/EG_*.json; do
+  remaining=0
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    local_path="$OUT/$name"
+    [ -f "$local_path" ] || continue
+    eval "$(fields "$name" "$manifest")"
+    if [ -n "$booking" ] && [ -n "$until" ]; then
+      mkdir -p "$HOLD/$booking"
+      fields "$name" "$manifest" > "$HOLD/$booking/$name.fields"
+      mv "$local_path" "$HOLD/$booking/$name"
+      echo "held for booking $booking until $(date -d "@$((until + 3600))" +%FT%T): $name"
+      continue
+    fi
+    ship "$local_path" "$name" || remaining=1
+  done < <(listed "$manifest")
+  [ "$remaining" = 0 ] && rm -f "$manifest"
+done
+
+# Bookings past their end plus an hour: join the parts in order of start
+# and ship the result under the first part's name, from its start to the
+# last part's end. Parts share the egress preset, so a stream copy joins them.
+for dir in "$HOLD"/room-booking-*/; do
+  dir=${dir%/}
+  parts=("$dir"/*.mp4)
+  [ ${#parts[@]} -gt 0 ] || { rmdir "$dir" 2>/dev/null; continue; }
+  . "${parts[0]}.fields"
+  [ -n "${until:-}" ] && [ "$(date +%s)" -ge $((until + 3600)) ] || continue
+  if [ ${#parts[@]} -eq 1 ]; then
+    joined=${parts[0]}
+  else
+    joined="$dir/joined.mp4"
+    list=$(mktemp)
+    for p in "${parts[@]}"; do printf "file '%s'\n" "${p//\'/\'\\\'\'}"; done > "$list"
+    if ! ffmpeg -nostdin -loglevel error -y -f concat -safe 0 -i "$list" -c copy "$joined"; then
+      echo "join failed for booking $(basename "$dir"), shipping the parts apart" >&2
+      rm -f "$list" "$joined"
+      for p in "${parts[@]}"; do . "$p.fields"; ship "$p" "$(basename "$p")" && rm -f "$p.fields"; done
+      continue
+    fi
+    rm -f "$list"
+    last="${parts[${#parts[@]}-1]}"
+    . "$last.fields"; last_end=$end
+    . "${parts[0]}.fields"; end=$last_end
+    echo "joined ${#parts[@]} parts for booking $(basename "$dir")"
+  fi
+  if ship "$joined" "$(basename "${parts[0]}")"; then
+    rm -f "${parts[@]}" "$dir"/*.fields
+    rmdir "$dir" 2>/dev/null
+  fi
+done
