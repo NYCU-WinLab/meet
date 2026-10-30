@@ -91,8 +91,7 @@ export async function listRooms(): Promise<RoomSummary[]> {
         createdBy: metadata.createdBy,
         createdAt: new Date(Number(room.creationTime) * 1000),
         participants: participants
-          // Agents and egress are not members.
-          .filter((p) => p.kind === 0 || p.kind === undefined)
+          .filter(isMember)
           .map((p) => ({ identity: p.identity, name: p.name || p.identity })),
       }
     })
