@@ -19,8 +19,9 @@ export async function recordEvent(event: WebhookEvent) {
     room: event.room?.name ?? egress?.roomName ?? null,
     roomSid: event.room?.sid ?? egress?.roomId ?? null,
     participant: participant?.identity ?? null,
+    // Only members count toward minutes; egress joins as a participant too.
     participantSeconds:
-      event.event === "participant_left" && participant
+      event.event === "participant_left" && participant && !participant.kind
         ? Math.max(0, Number(event.createdAt) - Number(participant.joinedAt))
         : null,
     egressId: egress?.egressId ?? null,
