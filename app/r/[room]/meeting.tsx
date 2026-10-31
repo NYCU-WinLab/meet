@@ -67,7 +67,8 @@ export function Meeting({
   const [panel, setPanel] = React.useState<Panel>(null)
   const [summary, setSummary] = React.useState<Summary | null>(null)
   const pending =
-    summary?.agenda?.filter((item) => item.status !== "done").length ?? 0
+    // 未討論 counts items nobody has touched; a partial one has been raised.
+    summary?.agenda?.filter((item) => item.status === "pending").length ?? 0
   useAgendaReminder(endsAt, pending)
   const toggle = (name: Panel) =>
     setPanel((open) => (open === name ? null : name))
