@@ -18,7 +18,12 @@ import type {
 } from "@livekit/rtc-node"
 import { AccessToken, RoomServiceClient } from "livekit-server-sdk"
 
-import { summarize, type Summary } from "./summarize.js"
+import {
+  initial,
+  summarize,
+  type AgendaState,
+  type Summary,
+} from "./summarize.js"
 import { transcribeChunk } from "./transcribe.js"
 
 const url = need("LIVEKIT_URL")
@@ -52,7 +57,7 @@ type Meeting = {
   lines: Line[]
   /** How many lines the summary has seen. */
   seen: number
-  summary: Summary | null
+  summary: Summary
   summarizing: boolean
   timer: ReturnType<typeof setInterval>
 }
@@ -77,7 +82,7 @@ async function poll() {
   const live = new Set(list.map((room) => room.name))
   for (const room of list) {
     if (room.numParticipants > 0 && !joined.has(room.name)) {
-      void join(room.name)
+      void join(room.name, agendaOf(room.metadata))
     }
   }
   for (const [name, meeting] of joined) {
@@ -91,14 +96,38 @@ function leave(meeting: Meeting) {
   void meeting.room.disconnect()
 }
 
-async function join(name: string) {
+// The agenda meet put in the room's metadata, all items pending.
+function agendaOf(raw: string): AgendaState[] {
+  try {
+    const items = (JSON.parse(raw) as { agenda?: unknown }).agenda
+    if (!Array.isArray(items)) return []
+    return items.flatMap(
+      (item: { id?: unknown; text?: unknown; url?: unknown }) =>
+        typeof item?.id === "string" && typeof item.text === "string"
+          ? [
+              {
+                id: item.id,
+                text: item.text,
+                ...(typeof item.url === "string" ? { url: item.url } : {}),
+                status: "pending" as const,
+                note: "",
+              },
+            ]
+          : []
+    )
+  } catch {
+    return []
+  }
+}
+
+async function join(name: string, agenda: AgendaState[]) {
   const room = new Room()
   const meeting: Meeting = {
     room,
     name,
     lines: [],
     seen: 0,
-    summary: null,
+    summary: initial(agenda),
     summarizing: false,
     timer: setInterval(() => void refresh(meeting), summaryMs),
   }
@@ -120,7 +149,7 @@ async function join(name: string) {
   })
   // Someone who joins late gets the summary so far.
   room.on(RoomEvent.ParticipantConnected, () => {
-    if (meeting.summary) void publish(meeting)
+    if (hasContent(meeting.summary)) void publish(meeting)
   })
   room.on(RoomEvent.ParticipantDisconnected, () => {
     if (room.remoteParticipants.size === 0) {
@@ -139,7 +168,9 @@ async function join(name: string) {
       autoSubscribe: true,
       dynacast: false,
     })
-    log(name, "joined")
+    log(name, "joined", { agenda: agenda.length })
+    // The checklist shows before anyone speaks.
+    if (agenda.length > 0) await publish(meeting)
   } catch (error) {
     log(name, "connect failed", error)
     leave(meeting)
@@ -214,8 +245,11 @@ async function refresh(meeting: Meeting) {
   }
 }
 
+// Nothing to show yet: no words heard and no agenda.
+const hasContent = (summary: Summary) =>
+  summary.summary !== "" || summary.agenda.length > 0
+
 async function publish(meeting: Meeting) {
-  if (!meeting.summary) return
   await meeting.room.localParticipant?.sendText(
     JSON.stringify(meeting.summary),
     { topic: TOPIC }
