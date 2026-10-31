@@ -38,6 +38,8 @@ const summaryMs = Number(process.env.SUMMARY_EVERY_MS ?? 45000)
 
 export const SAMPLE_RATE = 16000
 export const TOPIC = "meet.summary"
+// What @livekit/components-react's useChat sends on.
+const CHAT_TOPIC = "lk.chat"
 
 function need(name: string) {
   const value = process.env[name]
@@ -146,6 +148,24 @@ async function join(name: string, agenda: AgendaState[]) {
     if (track.kind !== TrackKind.KIND_AUDIO) return
     if (publication.source !== TrackSource.SOURCE_MICROPHONE) return
     void listen(meeting, track, publication, participant)
+  })
+  // Typed chat counts as said: each message is one line, marked as chat.
+  room.registerTextStreamHandler(CHAT_TOPIC, (reader, { identity }) => {
+    void reader
+      .readAll()
+      .then((text) => {
+        const said = text.trim().slice(0, 2000)
+        if (!said) return
+        const from = room.remoteParticipants.get(identity)
+        const who = from?.name || identity
+        meeting.lines.push({
+          at: Date.now(),
+          who: `${who}（聊天）`,
+          text: said,
+        })
+        log(name, "chat line", said.length, "chars")
+      })
+      .catch((error) => log(name, "chat read failed", error))
   })
   // Someone who joins late gets the summary so far.
   room.on(RoomEvent.ParticipantConnected, () => {
