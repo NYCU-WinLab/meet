@@ -24,6 +24,9 @@ export async function recordEvent(event: WebhookEvent) {
       event.event === "participant_left" && participant && !participant.kind
         ? Math.max(0, Number(event.createdAt) - Number(participant.joinedAt))
         : null,
+    member: participant
+      ? !participant.kind && !participant.permission?.hidden
+      : null,
     egressId: egress?.egressId ?? null,
     egressStatus: egress ? EgressStatus[egress.status] : null,
     egressSeconds:
@@ -32,6 +35,10 @@ export async function recordEvent(event: WebhookEvent) {
           Math.round(Number(file.duration) / ns))
         : null,
     egressBytes: file ? Number(file.size) : null,
+    egressFileStartedAt:
+      event.event === "egress_ended" && file && file.startedAt > BigInt(0)
+        ? new Date(Number(file.startedAt / BigInt(1e6)))
+        : null,
     error: egress?.error || null,
   })
 }

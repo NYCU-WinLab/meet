@@ -2,6 +2,7 @@
 // history. LiveKit itself forgets a room the moment it closes.
 import {
   bigint,
+  boolean,
   index,
   integer,
   pgTable,
@@ -24,12 +25,18 @@ export const livekitEvent = pgTable(
     participant: text(),
     /** How long they stayed, on participant_left. */
     participantSeconds: integer(),
+    /** On participant events: a member, not the recorder, an agent or the
+     * hidden summary participant. Null on rows from before it was kept. */
+    member: boolean(),
     egressId: text(),
     /** EgressStatus name, on egress events: EGRESS_COMPLETE, EGRESS_FAILED, … */
     egressStatus: text(),
     /** The recording's length and size, on egress_ended. */
     egressSeconds: integer(),
     egressBytes: bigint({ mode: "number" }),
+    /** On egress_ended: when the file's own first frame was taken, which is
+     * later than the egress started (the recorder waits for a track). */
+    egressFileStartedAt: timestamp({ withTimezone: true, mode: "date" }),
     error: text(),
   },
   (table) => [index("livekit_events_at_idx").on(table.at)]
