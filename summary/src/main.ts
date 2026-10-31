@@ -6,6 +6,7 @@
 // meet.summary text stream. Audio is never written anywhere.
 import {
   AudioStream,
+  ParticipantKind,
   Room,
   RoomEvent,
   TrackKind,
@@ -79,8 +80,10 @@ const rooms = new RoomServiceClient(
 )
 const joined = new Map<string, Meeting>()
 
-// A room is worth joining once someone besides us is in it. Rooms that end
-// take the Room's own disconnect with them.
+// A room is worth joining once a member is in it. The recorder counts in
+// numParticipants but is no member: joining a room only it is in would keep
+// the room open, and the recording running, after everyone left. Rooms that
+// end take the Room's own disconnect with them.
 async function poll() {
   let list
   try {
@@ -91,14 +94,22 @@ async function poll() {
   }
   const live = new Set(list.map((room) => room.name))
   for (const room of list) {
-    if (room.numParticipants > 0 && !joined.has(room.name)) {
-      void join(room.name, agendaOf(room.metadata))
+    if (room.numParticipants === 0 || joined.has(room.name)) continue
+    try {
+      const people = await rooms.listParticipants(room.name)
+      if (people.some(isMember)) void join(room.name, agendaOf(room.metadata))
+    } catch (error) {
+      log(room.name, "listParticipants failed", error)
     }
   }
   for (const [name, meeting] of joined) {
     if (!live.has(name)) leave(meeting)
   }
 }
+
+/** A member: not the recorder, not an agent, not hidden like us. */
+const isMember = (p: { kind?: number; permission?: { hidden?: boolean } }) =>
+  (p.kind === 0 || p.kind === undefined) && !p.permission?.hidden
 
 function leave(meeting: Meeting) {
   clearInterval(meeting.timer)
@@ -182,7 +193,10 @@ async function join(name: string, agenda: AgendaState[]) {
     if (hasContent(meeting.summary)) void publish(meeting)
   })
   room.on(RoomEvent.ParticipantDisconnected, () => {
-    if (room.remoteParticipants.size === 0) {
+    const members = [...room.remoteParticipants.values()].filter(
+      (p) => p.kind === ParticipantKind.STANDARD
+    )
+    if (members.length === 0) {
       log(name, "empty, leaving")
       leave(meeting)
     }
