@@ -19,6 +19,7 @@ import type {
 import { AccessToken, RoomServiceClient } from "livekit-server-sdk"
 
 import {
+  answer,
   initial,
   summarize,
   type AgendaState,
@@ -38,6 +39,13 @@ const summaryMs = Number(process.env.SUMMARY_EVERY_MS ?? 45000)
 
 export const SAMPLE_RATE = 16000
 export const TOPIC = "meet.summary"
+// What @livekit/components-react's useChat sends on.
+const CHAT_TOPIC = "lk.chat"
+// A chat message that mentions the agent is a question for it.
+const MENTION = /@agent\b/i
+// The meeting page names a chat message carrying this attribute "agent":
+// the agent is hidden, so the page cannot look its name up.
+const AGENT_ATTRIBUTE = "meet.agent"
 
 function need(name: string) {
   const value = process.env[name]
@@ -59,6 +67,8 @@ type Meeting = {
   seen: number
   summary: Summary
   summarizing: boolean
+  /** An @agent question is being answered; one at a time per room. */
+  answering: boolean
   timer: ReturnType<typeof setInterval>
 }
 
@@ -129,6 +139,7 @@ async function join(name: string, agenda: AgendaState[]) {
     seen: 0,
     summary: initial(agenda),
     summarizing: false,
+    answering: false,
     timer: setInterval(() => void refresh(meeting), summaryMs),
   }
   joined.set(name, meeting)
@@ -146,6 +157,25 @@ async function join(name: string, agenda: AgendaState[]) {
     if (track.kind !== TrackKind.KIND_AUDIO) return
     if (publication.source !== TrackSource.SOURCE_MICROPHONE) return
     void listen(meeting, track, publication, participant)
+  })
+  // Typed chat counts as said: each message is one line, marked as chat.
+  room.registerTextStreamHandler(CHAT_TOPIC, (reader, { identity }) => {
+    void reader
+      .readAll()
+      .then((text) => {
+        const said = text.trim().slice(0, 2000)
+        if (!said) return
+        const from = room.remoteParticipants.get(identity)
+        const who = from?.name || identity
+        meeting.lines.push({
+          at: Date.now(),
+          who: `${who}（聊天）`,
+          text: said,
+        })
+        log(name, "chat line", said.length, "chars")
+        if (MENTION.test(said)) void ask(meeting, who, said)
+      })
+      .catch((error) => log(name, "chat read failed", error))
   })
   // Someone who joins late gets the summary so far.
   room.on(RoomEvent.ParticipantConnected, () => {
@@ -248,6 +278,34 @@ async function refresh(meeting: Meeting) {
 // Nothing to show yet: no words heard and no agenda.
 const hasContent = (summary: Summary) =>
   summary.summary !== "" || summary.agenda.length > 0
+
+// Answers one @agent question in the chat, and keeps the answer as a line
+// so the summary knows what was said.
+async function ask(meeting: Meeting, who: string, said: string) {
+  const reply = async (text: string) => {
+    await meeting.room.localParticipant?.sendText(text, {
+      topic: CHAT_TOPIC,
+      attributes: { [AGENT_ATTRIBUTE]: "1" },
+    })
+  }
+  if (meeting.answering) {
+    await reply("上一題還在查，等我回完再問。")
+    return
+  }
+  meeting.answering = true
+  try {
+    const question = said.replace(MENTION, "").trim().slice(0, 500)
+    const text = await answer(meeting.summary, meeting.lines, who, question)
+    await reply(text)
+    meeting.lines.push({ at: Date.now(), who: "agent（聊天）", text })
+    log(meeting.name, "answered", question.length, "->", text.length, "chars")
+  } catch (error) {
+    log(meeting.name, "answer failed", error)
+    await reply("這題查不到，稍後再試。").catch(() => {})
+  } finally {
+    meeting.answering = false
+  }
+}
 
 async function publish(meeting: Meeting) {
   await meeting.room.localParticipant?.sendText(

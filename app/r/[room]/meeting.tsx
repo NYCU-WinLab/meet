@@ -19,10 +19,9 @@ import {
   CircleDashedIcon,
   CircleDotIcon,
   LinkIcon,
-  ListChecksIcon,
   LogOutIcon,
   MicIcon,
-  MessageSquareIcon,
+  MessagesSquareIcon,
   MicOffIcon,
   MonitorUpIcon,
   MonitorXIcon,
@@ -64,14 +63,13 @@ export function Meeting({
   endsAt: Date | null
 }) {
   const router = useRouter()
-  const [panel, setPanel] = React.useState<Panel>(null)
+  const [open, setOpen] = React.useState(false)
   const [summary, setSummary] = React.useState<Summary | null>(null)
   const pending =
     // 未討論 counts items nobody has touched; a partial one has been raised.
     summary?.agenda?.filter((item) => item.status === "pending").length ?? 0
   useAgendaReminder(endsAt, pending)
-  const toggle = (name: Panel) =>
-    setPanel((open) => (open === name ? null : name))
+  const toggle = () => setOpen((was) => !was)
   return (
     <LiveKitRoom
       serverUrl={serverUrl}
@@ -82,7 +80,7 @@ export function Meeting({
       onMediaDeviceFailure={(failure) => {
         if (failure) toast.error("開不了鏡頭或麥克風，請檢查瀏覽器權限")
       }}
-      className="fixed top-18 right-6 bottom-6 left-6 flex flex-col gap-6 md:top-22 md:flex-row"
+      className="fixed top-18 right-6 bottom-6 left-6 flex flex-col gap-6 md:top-22 md:flex-row md:gap-0"
     >
       <RoomAudioRenderer />
       <SummaryListener onSummary={setSummary} />
@@ -90,17 +88,16 @@ export function Meeting({
       <div
         className={cn(
           "min-h-0 min-w-0 flex-1 flex-col",
-          panel ? "hidden md:flex" : "flex"
+          open ? "hidden md:flex" : "flex"
         )}
       >
         <Stage />
       </div>
-      {panel === "chat" && <Chat />}
-      {panel === "summary" && <SummaryPanel summary={summary} />}
+      <MeetingPanel open={open} summary={summary} />
       <div className="flex justify-center md:hidden">
-        <Controls panel={panel} onToggle={toggle} pending={pending} />
+        <Controls open={open} onToggle={toggle} pending={pending} />
       </div>
-      <ControlsInCorner panel={panel} onToggle={toggle} pending={pending} />
+      <ControlsInCorner open={open} onToggle={toggle} pending={pending} />
     </LiveKitRoom>
   )
 }
@@ -266,16 +263,16 @@ function ControlsInCorner(props: React.ComponentProps<typeof Controls>) {
   return slot ? createPortal(<Controls {...props} />, slot) : null
 }
 
-type Panel = "chat" | "summary" | null
-
+// Controls in three groups: what I send (mic, camera, screen), the meeting
+// (its panel, its link), and leaving.
 function Controls({
-  panel,
+  open,
   onToggle,
   pending,
 }: {
-  panel: Panel
-  onToggle: (name: Panel) => void
-  /** Agenda items not yet discussed, shown on the summary control. */
+  open: boolean
+  onToggle: () => void
+  /** Agenda items not yet discussed, shown on the panel control. */
   pending: number
 }) {
   const room = useRoomContext()
@@ -322,23 +319,17 @@ function Controls({
         >
           {isScreenShareEnabled ? <MonitorXIcon /> : <MonitorUpIcon />}
         </Control>
-        <Control
-          label={panel === "chat" ? "收起聊天" : "聊天"}
-          active={panel === "chat"}
-          onClick={() => onToggle("chat")}
-        >
-          <MessageSquareIcon />
-        </Control>
+        <Divider />
         <Control
           label={
-            (panel === "summary" ? "收起摘要" : "摘要") +
+            (open ? "收起摘要與聊天" : "摘要與聊天") +
             (pending > 0 ? `，未討論 ${pending}` : "")
           }
-          active={panel === "summary"}
+          active={open}
           badge={pending > 0 ? pending : undefined}
-          onClick={() => onToggle("summary")}
+          onClick={onToggle}
         >
-          <ListChecksIcon />
+          <MessagesSquareIcon />
         </Control>
         <Tooltip>
           <TooltipTrigger
@@ -358,6 +349,7 @@ function Controls({
           </TooltipTrigger>
           <TooltipContent>複製會議連結</TooltipContent>
         </Tooltip>
+        <Divider />
         <Tooltip>
           <TooltipTrigger
             render={
@@ -377,6 +369,10 @@ function Controls({
     </TooltipProvider>
   )
 }
+
+const Divider = () => (
+  <span aria-hidden className="mx-1 h-6 w-px shrink-0 bg-border" />
+)
 
 function Control({
   label,
@@ -484,9 +480,43 @@ function SummaryListener({
   return null
 }
 
+// The summary above, the chat below, in one panel that slides in from the
+// right. It stays mounted while closed so the chat keeps its messages.
+function MeetingPanel({
+  open,
+  summary,
+}: {
+  open: boolean
+  summary: Summary | null
+}) {
+  return (
+    <div
+      inert={!open}
+      className={cn(
+        "min-h-0 overflow-hidden md:block md:transition-all md:duration-overlay md:motion-reduce:transition-none",
+        open ? "flex flex-1 flex-col md:w-86 md:flex-none" : "hidden md:w-0"
+      )}
+    >
+      <aside
+        aria-label="摘要與聊天"
+        className={cn(
+          "flex h-full min-h-0 flex-1 flex-col rounded-control bg-muted md:ml-6 md:w-80 md:transition-all md:duration-overlay",
+          open
+            ? "opacity-100"
+            : "opacity-0 md:translate-x-8 md:motion-reduce:translate-x-0"
+        )}
+      >
+        <SummaryPanel summary={summary} />
+        <Chat />
+      </aside>
+    </div>
+  )
+}
+
 function SummaryPanel({ summary }: { summary: Summary | null }) {
   return (
-    <aside className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto rounded-control bg-muted p-4 md:w-80 md:flex-none">
+    <section className="flex min-h-0 flex-1 basis-0 flex-col gap-4 overflow-y-auto p-4">
+      <h2 className="text-muted-foreground">摘要</h2>
       {summary?.agenda && summary.agenda.length > 0 && (
         <AgendaList items={summary.agenda} />
       )}
@@ -508,7 +538,7 @@ function SummaryPanel({ summary }: { summary: Summary | null }) {
           </p>
         </>
       )}
-    </aside>
+    </section>
   )
 }
 
@@ -594,17 +624,24 @@ function Chat() {
   }
 
   return (
-    <aside className="flex min-h-0 flex-1 flex-col gap-4 rounded-control bg-muted p-4 md:w-80 md:flex-none">
+    <section className="flex min-h-0 flex-1 basis-0 flex-col gap-4 border-t p-4">
+      <h2 className="text-muted-foreground">聊天</h2>
       <ol className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
         {chatMessages.length === 0 && (
           <li className="text-muted-foreground">還沒有人說話</li>
         )}
         {chatMessages.map((message) => {
           const mine = message.from?.identity === localParticipant.identity
+          // The agent is hidden, so its replies carry a mark instead of a name.
+          const agent = message.attributes?.["meet.agent"] === "1"
           return (
             <li key={message.id ?? message.timestamp} className="flex flex-col">
               <span className="text-muted-foreground">
-                {mine ? "我" : (message.from?.name ?? message.from?.identity)}
+                {mine
+                  ? "我"
+                  : agent
+                    ? "agent"
+                    : (message.from?.name ?? message.from?.identity)}
               </span>
               <span className="break-words whitespace-pre-wrap">
                 {message.message}
@@ -618,7 +655,7 @@ function Chat() {
         <Input
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
-          placeholder="說點什麼"
+          placeholder="說點什麼，@agent 可以發問"
           aria-label="訊息"
           maxLength={2000}
         />
@@ -632,6 +669,6 @@ function Chat() {
           <SendIcon />
         </Button>
       </form>
-    </aside>
+    </section>
   )
 }
