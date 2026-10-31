@@ -34,6 +34,9 @@ export const livekitEvent = pgTable(
     /** The recording's length and size, on egress_ended. */
     egressSeconds: integer(),
     egressBytes: bigint({ mode: "number" }),
+    /** On egress_ended: when the file's own first frame was taken, which is
+     * later than the egress started (the recorder waits for a track). */
+    egressFileStartedAt: timestamp({ withTimezone: true, mode: "date" }),
     error: text(),
   },
   (table) => [index("livekit_events_at_idx").on(table.at)]

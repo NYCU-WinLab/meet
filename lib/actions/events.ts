@@ -35,6 +35,10 @@ export async function recordEvent(event: WebhookEvent) {
           Math.round(Number(file.duration) / ns))
         : null,
     egressBytes: file ? Number(file.size) : null,
+    egressFileStartedAt:
+      event.event === "egress_ended" && file && file.startedAt > BigInt(0)
+        ? new Date(Number(file.startedAt / BigInt(1e6)))
+        : null,
     error: egress?.error || null,
   })
 }

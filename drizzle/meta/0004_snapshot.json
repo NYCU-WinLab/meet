@@ -1,5 +1,5 @@
 {
-  "id": "1f58ea04-4d39-421b-8c97-0f82de0257df",
+  "id": "6be54d4e-cc7e-48b6-b13f-ed8520109cc5",
   "prevId": "39d99463-af4f-4b91-9d87-01fd3d7e8048",
   "version": "7",
   "dialect": "postgresql",
@@ -1623,6 +1623,12 @@
         "egress_bytes": {
           "name": "egress_bytes",
           "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "egress_file_started_at": {
+          "name": "egress_file_started_at",
+          "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
         },

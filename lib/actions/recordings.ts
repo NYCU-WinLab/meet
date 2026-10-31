@@ -5,7 +5,7 @@ import { defineAction } from "@/lib/actions/define"
 import { db } from "@/lib/db"
 import { livekitEvent } from "@/lib/db/schema"
 
-/** A stretch of a recording with no member in the room, epoch seconds. */
+/** A stretch with no member in the room, in seconds. */
 export type Gap = { from: number; to: number }
 
 type Presence = {
@@ -65,16 +65,31 @@ export const recordingGaps = defineAction({
   name: "recording_gaps",
   title: "錄影空檔",
   description:
-    "For the egress uploader: the stretches between from and to (epoch seconds, a recording's start and end) when no member was in the room, as [{from, to}] in epoch seconds, so the recording can be cut to the time people were there. Service callers only.",
+    "For the egress uploader: the stretches of one finished recording (by egress id) when no member was in the room, as [{from, to}] in seconds from the file's first frame, so the recording can be cut to the time people were there. ready is false until LiveKit has reported the recording ended. Service callers only.",
   kind: "query",
-  input: z.object({
-    room: z.string().min(1).max(100),
-    from: z.number().int().positive(),
-    to: z.number().int().positive(),
-  }),
-  async run(actor, { room, from, to }) {
+  input: z.object({ egress: z.string().min(1).max(100) }),
+  async run(actor, { egress }) {
     if (!actor.service) throw new Error("只給錄影上傳服務用")
-    if (to <= from) return { gaps: [] }
+    const [ended] = await db
+      .select({
+        room: livekitEvent.room,
+        startedAt: livekitEvent.egressFileStartedAt,
+        seconds: livekitEvent.egressSeconds,
+      })
+      .from(livekitEvent)
+      .where(
+        and(
+          eq(livekitEvent.egressId, egress),
+          eq(livekitEvent.event, "egress_ended")
+        )
+      )
+      .limit(1)
+    if (!ended?.room || !ended.startedAt || !ended.seconds)
+      return { ready: false, gaps: [] as Gap[] }
+    // The file's own clock, in ms: the egress's start is seconds earlier.
+    const start = ended.startedAt.getTime() / 1000
+    const from = Math.floor(start)
+    const to = Math.ceil(start + ended.seconds)
     const rows = await db
       .select({
         event: livekitEvent.event,
@@ -85,7 +100,7 @@ export const recordingGaps = defineAction({
       .from(livekitEvent)
       .where(
         and(
-          eq(livekitEvent.room, room),
+          eq(livekitEvent.room, ended.room),
           inArray(livekitEvent.event, [
             "participant_joined",
             "participant_left",
@@ -98,6 +113,14 @@ export const recordingGaps = defineAction({
       ...row,
       at: Math.floor(row.at.getTime() / 1000),
     }))
-    return { gaps: emptySpans(presence, from, to) }
+    // Events are stamped to the second: round a gap inward so it never
+    // takes in a second someone was there.
+    const gaps = emptySpans(presence, from, to)
+      .map((gap) => ({
+        from: Math.max(0, Math.ceil(gap.from + 1 - start)),
+        to: Math.floor(gap.to - start),
+      }))
+      .filter((gap) => gap.to > gap.from)
+    return { ready: true, gaps }
   },
 })

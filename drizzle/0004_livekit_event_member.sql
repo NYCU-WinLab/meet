@@ -1,1 +1,0 @@
-ALTER TABLE "livekit_events" ADD COLUMN "member" boolean;
