@@ -12,6 +12,7 @@ import {
   getRoom,
   joinToken,
   listRooms as listLiveKitRooms,
+  openRoomCount,
   parseMetadata,
   stamp,
   unstamp,
@@ -64,13 +65,18 @@ export const CLOSES_AFTER_MS = 60 * 60 * 1000
 
 export type ScheduledRoom = typeof scheduledRoom.$inferSelect
 
+// Each egress machine records one room at a time, so no more rooms open at
+// once than there are machines: every meeting is recorded.
+export const MAX_ROOMS = Number(process.env.MEET_MAX_ROOMS ?? 2)
+export const FULL_MESSAGE = `同時最多 ${MAX_ROOMS} 間會議室，才能每間都錄影。請等其他會議結束。`
+
 const url = (name: string) => `${process.env.BETTER_AUTH_URL}/r/${name}`
 
 export const listRooms = defineAction({
   name: "list_rooms",
   title: "會議室列表",
   description:
-    "Every open meeting room: name (the id in its link), title, the project group or username its recording is filed under (prefix), who opened it, when, and the members in it now. A room closes by itself 10 minutes after the last member leaves. Also the rooms scheduled ahead that have not started (scheduled): name, title, booking, startsAt, endsAt and agenda (the items the meeting is for).",
+    "Every open meeting room: name (the id in its link), title, the project group or username its recording is filed under (prefix), who opened it, when, and the members in it now; maxRooms, the most open at once (create_room is refused at that count). A room closes by itself 10 minutes after the last member leaves. Also the rooms scheduled ahead that have not started (scheduled): name, title, booking, startsAt, endsAt and agenda (the items the meeting is for).",
   kind: "query",
   input: z.object({}),
   run: async () => {
@@ -90,6 +96,7 @@ export const listRooms = defineAction({
     const open = new Set(rooms.map((room) => room.name))
     return {
       rooms,
+      maxRooms: MAX_ROOMS,
       scheduled: scheduled
         .filter((room) => !open.has(room.name))
         .map(
@@ -136,7 +143,7 @@ export const createRoomAction = defineAction({
   name: "create_room",
   title: "開會議室",
   description:
-    "Opens a new meeting room now with a title and returns its name and link (https://meet.winlab.tw/r/<name>). Share the link; any lab member can join. The room records itself from the first member in; group (a slug from list_groups) files the recording under that project in GitLab, otherwise under the member's own username. agenda (one line per item) shows as a checklist the running summary ticks off. For a meeting booked ahead use schedule_room.",
+    "Opens a new meeting room now with a title and returns its name and link; refused while the most rooms that can be recorded at once (2) are open (https://meet.winlab.tw/r/<name>). Share the link; any lab member can join. The room records itself from the first member in; group (a slug from list_groups) files the recording under that project in GitLab, otherwise under the member's own username. agenda (one line per item) shows as a checklist the running summary ticks off. For a meeting booked ahead use schedule_room.",
   kind: "mutation",
   input: z.object({
     title,
@@ -156,6 +163,7 @@ export const createRoomAction = defineAction({
         userId: me.id,
       })
     }
+    if ((await openRoomCount()) >= MAX_ROOMS) throw new Error(FULL_MESSAGE)
     const name = newRoomName()
     await createRoom(name, {
       title: input.title,
@@ -297,6 +305,8 @@ export type JoinState =
     }
   | { state: "early"; title: string; opensAt: Date; startsAt: Date }
   | { state: "ended"; title: string }
+  /** The most rooms that can be recorded at once are open. */
+  | { state: "full"; title: string }
 
 // A scheduled room whose LiveKit room is not open: open it if the time is
 // right, otherwise say when. Portal is asked for the agenda again on the
@@ -315,6 +325,8 @@ async function openScheduled(name: string): Promise<JoinState | null> {
     return { state: "early", title: row.title, opensAt, startsAt: row.startsAt }
   if (now > row.endsAt.getTime() + CLOSES_AFTER_MS)
     return { state: "ended", title: row.title }
+  if ((await openRoomCount()) >= MAX_ROOMS)
+    return { state: "full", title: row.title }
   const fresh = await bookingAgenda(row.booking)
   if (fresh?.status === "cancelled") {
     await db

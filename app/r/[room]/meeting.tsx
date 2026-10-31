@@ -5,6 +5,7 @@ import {
   RoomAudioRenderer,
   useChat,
   useIsMuted,
+  useIsRecording,
   useIsSpeaking,
   useLocalParticipant,
   useRoomContext,
@@ -295,6 +296,8 @@ function Controls({
   return (
     <TooltipProvider>
       <div className="flex items-center gap-3">
+        <RecordingState />
+        <Divider />
         <Control
           label={isMicrophoneEnabled ? "關麥克風" : "開麥克風"}
           active={isMicrophoneEnabled}
@@ -367,6 +370,56 @@ function Controls({
         </Tooltip>
       </div>
     </TooltipProvider>
+  )
+}
+
+// Whether the room is being recorded. The recorder joins a few seconds after
+// the first member, so a room is only called unrecorded after a grace.
+const RECORDING_GRACE_MS = 20_000
+
+function RecordingState() {
+  const recording = useIsRecording()
+  const [late, setLate] = React.useState(false)
+  React.useEffect(() => {
+    const timer = setTimeout(() => setLate(true), RECORDING_GRACE_MS)
+    return () => clearTimeout(timer)
+  }, [])
+  const label = recording ? "錄影中" : late ? "未錄影" : "錄影準備中"
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span
+            role="status"
+            className={cn(
+              "flex h-9 items-center gap-2 px-1",
+              !recording && "text-muted-foreground",
+              !recording && late && "text-destructive"
+            )}
+          />
+        }
+      >
+        <span
+          aria-hidden
+          className={cn(
+            "size-2.5 rounded-full",
+            recording
+              ? "animate-pulse bg-destructive"
+              : late
+                ? "bg-destructive"
+                : "bg-muted-foreground"
+          )}
+        />
+        <span className="hidden lg:inline">{label}</span>
+      </TooltipTrigger>
+      <TooltipContent>
+        {recording
+          ? "這場會議正在錄影，結束後會上傳並產生逐字稿"
+          : late
+            ? "這場會議沒有在錄影"
+            : "錄影機加入中"}
+      </TooltipContent>
+    </Tooltip>
   )
 }
 

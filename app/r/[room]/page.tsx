@@ -4,7 +4,7 @@ import { MeetShell } from "@/components/meet-shell"
 import { StatusPage } from "@/components/status-page"
 import { buttonVariants } from "@/components/ui/button"
 import { runAction } from "@/lib/actions/define"
-import { joinRoom } from "@/lib/actions/rooms"
+import { FULL_MESSAGE, joinRoom } from "@/lib/actions/rooms"
 import { requireActor } from "@/lib/auth/session"
 
 import { CONTROLS_SLOT, Meeting } from "./meeting"
@@ -49,7 +49,9 @@ export default async function RoomPage({ params }: PageProps<"/r/[room]">) {
           title={
             joined.state === "early"
               ? `${joined.title} ${when.format(joined.startsAt)} 開始，${when.format(joined.opensAt)} 起可進入`
-              : `${joined.title} 已結束`
+              : joined.state === "full"
+                ? `${joined.title} 還不能開始：${FULL_MESSAGE}`
+                : `${joined.title} 已結束`
           }
           action={
             <Link href="/" prefetch className={buttonVariants()}>
