@@ -13,6 +13,8 @@ type Presence = {
   at: number
   participant: string | null
   member: boolean | null
+  /** On participant_left: how long they had stayed. */
+  seconds?: number | null
 }
 
 // Rows from before the member column was kept: the recorder joins as EG_…
@@ -58,7 +60,23 @@ export function emptySpans(rows: Presence[], from: number, to: number) {
   if (!started) mark(from)
   if (emptySince !== null && to > emptySince)
     gaps.push({ from: emptySince, to })
-  return gaps
+  // A leave also says how long that member stayed, so a lost join still
+  // shows them there: take those stretches out of the gaps.
+  let left = gaps
+  for (const row of rows) {
+    if (row.event !== "participant_left" || !row.seconds || !isMember(row))
+      continue
+    const here = { from: row.at - row.seconds - 1, to: row.at + 1 }
+    left = left.flatMap((gap) =>
+      here.to <= gap.from || here.from >= gap.to
+        ? [gap]
+        : [
+            { from: gap.from, to: here.from },
+            { from: here.to, to: gap.to },
+          ].filter((part) => part.to > part.from)
+    )
+  }
+  return left
 }
 
 export const recordingGaps = defineAction({
@@ -96,6 +114,7 @@ export const recordingGaps = defineAction({
         at: livekitEvent.at,
         participant: livekitEvent.participant,
         member: livekitEvent.member,
+        seconds: livekitEvent.participantSeconds,
       })
       .from(livekitEvent)
       .where(
