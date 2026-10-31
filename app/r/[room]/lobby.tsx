@@ -99,54 +99,58 @@ function Lobby({
   const microphones = useMediaDevices({ kind: "audioinput" })
 
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-col gap-6">
-      <h1 className="text-title font-medium">{title}</h1>
-      <Preview track={video} />
-      <Level track={audio} />
-      {failed && (
-        <p className="text-destructive">
-          開不了鏡頭或麥克風，請在瀏覽器網址列允許使用
-        </p>
-      )}
-      <div className="grid gap-4 sm:grid-cols-2">
-        <DeviceRow
-          on={userChoices.audioEnabled}
-          onToggle={() => saveAudioInputEnabled(!userChoices.audioEnabled)}
-          onLabel="關麥克風"
-          offLabel="開麥克風"
-          onIcon={<MicIcon />}
-          offIcon={<MicOffIcon />}
-          devices={microphones}
-          value={userChoices.audioDeviceId || deviceOf(audio)}
-          onPick={saveAudioInputDeviceId}
-          placeholder="麥克風"
-        />
-        <DeviceRow
-          on={userChoices.videoEnabled}
-          onToggle={() => saveVideoInputEnabled(!userChoices.videoEnabled)}
-          onLabel="關鏡頭"
-          offLabel="開鏡頭"
-          onIcon={<VideoIcon />}
-          offIcon={<VideoOffIcon />}
-          devices={cameras}
-          value={userChoices.videoDeviceId || deviceOf(video)}
-          onPick={saveVideoInputDeviceId}
-          placeholder="鏡頭"
-        />
+    // The same frame as the meeting, with the lobby in its middle; a short
+    // window scrolls instead of cutting it off.
+    <div className="fixed top-18 right-6 bottom-6 left-6 flex flex-col overflow-y-auto md:top-22">
+      <div className="m-auto flex w-full max-w-2xl flex-col gap-6">
+        <h1 className="text-title font-medium">{title}</h1>
+        <Preview track={video} />
+        <Level track={audio} />
+        {failed && (
+          <p className="text-destructive">
+            開不了鏡頭或麥克風，請在瀏覽器網址列允許使用
+          </p>
+        )}
+        <div className="grid gap-4 sm:grid-cols-2">
+          <DeviceRow
+            on={userChoices.audioEnabled}
+            onToggle={() => saveAudioInputEnabled(!userChoices.audioEnabled)}
+            onLabel="關麥克風"
+            offLabel="開麥克風"
+            onIcon={<MicIcon />}
+            offIcon={<MicOffIcon />}
+            devices={microphones}
+            value={userChoices.audioDeviceId || deviceOf(audio)}
+            onPick={saveAudioInputDeviceId}
+            placeholder="麥克風"
+          />
+          <DeviceRow
+            on={userChoices.videoEnabled}
+            onToggle={() => saveVideoInputEnabled(!userChoices.videoEnabled)}
+            onLabel="關鏡頭"
+            offLabel="開鏡頭"
+            onIcon={<VideoIcon />}
+            offIcon={<VideoOffIcon />}
+            devices={cameras}
+            value={userChoices.videoDeviceId || deviceOf(video)}
+            onPick={saveVideoInputDeviceId}
+            placeholder="鏡頭"
+          />
+        </div>
+        <Button
+          autoFocus
+          onClick={() =>
+            onJoin({
+              audio: userChoices.audioEnabled,
+              video: userChoices.videoEnabled,
+              audioDeviceId: userChoices.audioDeviceId,
+              videoDeviceId: userChoices.videoDeviceId,
+            })
+          }
+        >
+          加入會議
+        </Button>
       </div>
-      <Button
-        autoFocus
-        onClick={() =>
-          onJoin({
-            audio: userChoices.audioEnabled,
-            video: userChoices.videoEnabled,
-            audioDeviceId: userChoices.audioDeviceId,
-            videoDeviceId: userChoices.videoDeviceId,
-          })
-        }
-      >
-        加入會議
-      </Button>
     </div>
   )
 }
