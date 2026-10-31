@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic"
 
 export default async function Home() {
   const actor = await requireActor("/")
-  const [{ rooms, scheduled }, { groups }, me] = await Promise.all([
+  const [{ rooms, maxRooms, scheduled }, { groups }, me] = await Promise.all([
     runAction(listRooms, actor, {}),
     runAction(listGroups, actor, {}).catch(() => ({ groups: [] })),
     runAction(whoami, actor, {}),
@@ -22,7 +22,13 @@ export default async function Home() {
       <div className="flex flex-col gap-12">
         <PageHeader
           title="會議室"
-          actions={<CreateRoom groups={groups} self={me.username ?? me.name} />}
+          actions={
+            <CreateRoom
+              groups={groups}
+              self={me.username ?? me.name}
+              full={rooms.length >= maxRooms}
+            />
+          }
         />
         <RoomList rooms={rooms} scheduled={scheduled} />
       </div>

@@ -23,12 +23,24 @@ import { createRoom } from "./actions"
 export function CreateRoom({
   groups,
   self,
+  full,
 }: {
   groups: ProjectGroup[]
   /** The member's username, the file prefix when no group is chosen. */
   self: string
+  /** As many rooms are open as can be recorded at once. */
+  full: boolean
 }) {
   const router = useRouter()
+  if (full)
+    return (
+      <div className="flex items-center gap-3">
+        <span className="text-muted-foreground">
+          會議室已滿，等其他會議結束
+        </span>
+        <Button disabled>開會議室</Button>
+      </div>
+    )
   const items = [
     { value: "", label: `自己（${self}）` },
     ...groups.map((group) => ({ value: group.name, label: group.label })),

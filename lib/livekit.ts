@@ -191,6 +191,11 @@ export async function getRoom(name: string) {
   return room ?? null
 }
 
+/** How many rooms are open now, with or without anyone in them. */
+export async function openRoomCount() {
+  return (await api().room.listRooms()).length
+}
+
 /** How many recordings are running right now. */
 export async function activeRecordings() {
   const list = await api().egress.listEgress({ active: true })
