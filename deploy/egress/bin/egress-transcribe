@@ -127,9 +127,7 @@ hand_off() { # <pending>; needs the pending file's fields in scope
     [SUBJECT]=${subject:-$stem} [PERSON]=${person:-} [GROUP_NAME]=${group:-}
     [START_TIME]=${start:-} [END_TIME]=${end:-} [BOOKING_REQUEST_ID]=${booking:-})
   if [ -n "${dir:-}" ]; then
-    # The helper refuses ".." anywhere in the file name, and reads the path
-    # as sent, so dots in the stem go encoded.
-    v[DL_URL]="$root$(urlencode "$stem" | sed 's/\./%2E/g').mp4"
+    v[DL_URL]="$root$(urlencode "$stem").mp4"
     v[RELAY_VERSION]=2 v[TX_JOB_ID]=$job
     v[TRANSCRIPT_STATUS]=${tx_status:-failed} v[TRANSCRIPT_SHA256]=${sha_txt:-} v[SUBTITLE_SHA256]=${sha_srt:-}
     v[NOTES_STATUS]=${notes_status:-none} v[NOTES_SHA256]=${sha_notes_md:-} v[NOTES_JSON_SHA256]=${sha_notes_json:-}
