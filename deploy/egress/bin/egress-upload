@@ -59,14 +59,19 @@ PY
 urlencode() { python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1]))' "$1"; }
 
 # Uploads one file to Nextcloud, hands it to transcribe and removes it.
-# Needs the fields in scope. Returns 1 when the file must stay for a retry.
+# Each recording gets its own folder, meet/<YYYY-MM>/<stem>/, so its
+# transcript, subtitles and notes sit beside it and one folder share hands
+# all of them to the helper. Needs the fields in scope. Returns 1 when the
+# file must stay for a retry.
 ship() { # <local_path> <name>
-  local local_path=$1 name=$2 month sha target code remote job
+  local local_path=$1 name=$2 month stem sha target code remote job
   month=$(date -r "$local_path" +%Y-%m)
+  stem=${name%.mp4}
   sha=$(sha256sum "$local_path" | cut -c1-64)
   curl -g -fsS -u "$AUTH" -X MKCOL "$DAV/$NC_DIR/" >/dev/null 2>&1 || true
   curl -g -fsS -u "$AUTH" -X MKCOL "$DAV/$NC_DIR/$month/" >/dev/null 2>&1 || true
-  target="$DAV/$NC_DIR/$month/$(urlencode "$name")"
+  curl -g -fsS -u "$AUTH" -X MKCOL "$DAV/$NC_DIR/$month/$(urlencode "$stem")/" >/dev/null 2>&1 || true
+  target="$DAV/$NC_DIR/$month/$(urlencode "$stem")/$(urlencode "$name")"
   code=$(curl -g -sS -o /dev/null -w "%{http_code}" -u "$AUTH" -T "$local_path" "$target")
   if [ "$code" != 201 ] && [ "$code" != 204 ]; then
     echo "upload failed ($code): $name" >&2; return 1
@@ -75,15 +80,16 @@ ship() { # <local_path> <name>
   if [ "$remote" != "$(stat -c %s "$local_path")" ]; then
     echo "size mismatch: $name local $(stat -c %s "$local_path") remote $remote" >&2; return 1
   fi
-  echo "uploaded: $name -> $NC_DIR/$month/"
+  echo "uploaded: $name -> $NC_DIR/$month/$stem/"
   # Hand the recording to transcribe before it goes; egress-transcribe
   # collects the transcript when the job is done.
   if [ -n "${TX_TOKEN:-}" ]; then
     job=$(curl -g -sS -H "Authorization: Bearer $TX_TOKEN" -F "file=@$local_path" -F language=zh -F diarize=true "${TX_URL:-https://transcribe.winlab.tw}/api/jobs" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("job_id",""))' 2>/dev/null)
     if [ -n "$job" ]; then
       mkdir -p /var/lib/egress-transcribe
-      printf 'job=%q\nfolder=%q\nstem=%q\nroom=%q\negress=%q\nstart=%q\nend=%q\ngroup=%q\nperson=%q\nbooking=%q\nsubject=%q\nsha=%q\n' \
-        "$job" "$month" "${name%.mp4}" "$room" "$egress" "$start" "$end" "$group" "$person" "$booking" "$subject" "$sha" > "/var/lib/egress-transcribe/$job.pending"
+      # dir=1: the recording has its own folder (hand-off v2).
+      printf 'job=%q\nfolder=%q\ndir=1\nstem=%q\nroom=%q\negress=%q\nstart=%q\nend=%q\ngroup=%q\nperson=%q\nbooking=%q\nsubject=%q\nsha=%q\n' \
+        "$job" "$month/$stem" "$stem" "$room" "$egress" "$start" "$end" "$group" "$person" "$booking" "$subject" "$sha" > "/var/lib/egress-transcribe/$job.pending"
       mv "$local_path" "/var/lib/egress-transcribe/$job.mp4"
       echo "transcribe job $job: $name"
     else

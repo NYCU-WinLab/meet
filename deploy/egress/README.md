@@ -18,9 +18,33 @@ Files for the 2 LiveKit Egress VMs (`egress01`, `egress02`). Both run the same c
 
 1. The `egress` container records rooms into `~/egress/out/recordings/` (owned by uid 1001).
 2. The timer runs the service every minute.
-3. `egress-upload` waits for the `EG_*.json` manifest, sends the MP4 to transcribe, and uploads it to Nextcloud under `meet/<YYYY-MM>/`.
+3. `egress-upload` waits for the `EG_*.json` manifest, sends the MP4 to transcribe, and uploads it to Nextcloud under `meet/<YYYY-MM>/<stem>/`.
 4. Parts of one booking wait in `/var/lib/egress-hold/<booking>/` until 1 hour after the booking ends, then ffmpeg joins them.
-5. `egress-transcribe` puts the transcript, subtitles and notes next to the MP4, then sends the hand-off to the GitLab trigger.
+5. `egress-transcribe` puts the transcript, subtitles and notes next to the MP4 (`<stem>.txt`, `.srt`, `.notes.md`, `.notes.json`), then sends the hand-off to winlab-helper's trigger.
+
+## Hand-off v2
+
+The helper gets a read-only, password share of the recording's folder for 6 days and one signed trigger. It fetches the MP4 and each sidecar beside it, and checks them against the signed hashes.
+
+| Field | Value |
+| --- | --- |
+| `MEET_ROOM`, `MEET_EGRESS_ID` | The room name and the egress id |
+| `DL_URL` | `https://<share>:<password>@nextcloud.winlab.tw/public.php/webdav/<stem>.mp4` |
+| `NC_SIZE`, `NC_SHA256` | The MP4 as uploaded (with the subtitle track) |
+| `SUBJECT`, `PERSON`, `GROUP_NAME`, `BOOKING_REQUEST_ID` | From the file name |
+| `START_TIME`, `END_TIME` | From the egress manifest, UTC `YYYY-MM-DDTHH:MM:SSZ` |
+| `RELAY_VERSION` | `2` |
+| `TX_JOB_ID` | The transcribe job |
+| `TRANSCRIPT_STATUS` | `ok`, `empty` (no speech) or `failed` (the helper runs its own ASR) |
+| `TRANSCRIPT_SHA256`, `SUBTITLE_SHA256` | sha256 of `.txt` and `.srt`, or empty |
+| `NOTES_STATUS` | `ok`, `timeout` (none after 30 min), `failed` or `none` |
+| `NOTES_SHA256`, `NOTES_JSON_SHA256` | sha256 of `.notes.md` and `.notes.json`, or empty |
+| `NC_NAME` | `<stem>.mp4`, not signed |
+| `RELAY_SIG` | HMAC-SHA256 with `HELPER_RELAY_SECRET` over `KEY=value` lines of the 19 fields above in this order, no trailing newline |
+
+The statuses and hashes are written to the `.pending` file before the trigger, so a retry sends the same signed values. A `.pending` file from before folders (no `dir=1`) keeps the v1 hand-off: a share of the MP4 alone and the 11 v1 fields, signed the same way. Notes are asked as `lab_meeting` when the group is `lab-meeting`, else `general`.
+
+Rollout order: winlab-helper "Relay v2" merged, its egress token and `HELPER_RELAY_SECRET` set (winlab-helper#10, #11), then install these scripts and add the secret to `/etc/egress-upload.env`.
 
 ## Install or update
 
