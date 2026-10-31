@@ -35,6 +35,7 @@ export type Scheduled = {
   booking: string
   startsAt: Date
   endsAt: Date
+  agenda: { text: string }[]
 }
 
 // Every open room as one row: title, who is in it, and the way in. Rooms
@@ -62,7 +63,7 @@ export function RoomList({
           <div className="flex min-w-0 flex-1 flex-col">
             <span className="truncate font-medium">{room.title}</span>
             <span className="truncate text-muted-foreground">
-              {`${room.createdBy} 預約，${day.format(room.startsAt)} 開始，${time.format(room.endsAt)} 結束`}
+              {`${room.createdBy} 預約，${day.format(room.startsAt)} 開始，${time.format(room.endsAt)} 結束${room.agenda.length > 0 ? `，議程 ${room.agenda.length} 項` : ""}`}
             </span>
           </div>
           <div className="flex shrink-0 gap-3">

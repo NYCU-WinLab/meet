@@ -2,7 +2,8 @@ import { and, eq, gt, isNull } from "drizzle-orm"
 import { z } from "zod"
 
 import { defineAction, type Actor } from "@/lib/actions/define"
-import { projectGroups } from "@/lib/portal"
+import { AGENDA_MAX, agendaList, withIds } from "@/lib/agenda"
+import { bookingAgenda, projectGroups } from "@/lib/portal"
 import { db } from "@/lib/db"
 import { scheduledRoom, user } from "@/lib/db/schema"
 import {
@@ -11,7 +12,9 @@ import {
   getRoom,
   joinToken,
   listRooms as listLiveKitRooms,
+  parseMetadata,
   stamp,
+  unstamp,
   type RoomMetadata,
 } from "@/lib/livekit"
 import { emitErrorLog } from "@/lib/otel"
@@ -42,7 +45,7 @@ const title = z
   .string()
   .trim()
   .min(1, "請填會議名稱")
-  .max(40, "會議名稱最多 40 字")
+  .max(80, "會議名稱最多 80 字")
 const group = z.string().trim().max(64).optional()
 const booking = z
   .string()
@@ -67,7 +70,7 @@ export const listRooms = defineAction({
   name: "list_rooms",
   title: "會議室列表",
   description:
-    "Every open meeting room: name (the id in its link), title, the project group or username its recording is filed under (prefix), who opened it, when, and the members in it now. A room closes by itself 10 minutes after the last member leaves. Also the rooms scheduled ahead that have not started (scheduled): name, title, booking, startsAt, endsAt.",
+    "Every open meeting room: name (the id in its link), title, the project group or username its recording is filed under (prefix), who opened it, when, and the members in it now. A room closes by itself 10 minutes after the last member leaves. Also the rooms scheduled ahead that have not started (scheduled): name, title, booking, startsAt, endsAt and agenda (the items the meeting is for).",
   kind: "query",
   input: z.object({}),
   run: async () => {
@@ -99,6 +102,7 @@ export const listRooms = defineAction({
             booking,
             startsAt,
             endsAt,
+            agenda,
           }) => ({
             name,
             title,
@@ -107,6 +111,11 @@ export const listRooms = defineAction({
             booking,
             startsAt,
             endsAt,
+            agenda: agenda.map(({ text, source, url }) => ({
+              text,
+              source,
+              url,
+            })),
           })
         ),
     }
@@ -127,9 +136,16 @@ export const createRoomAction = defineAction({
   name: "create_room",
   title: "開會議室",
   description:
-    "Opens a new meeting room now with a title and returns its name and link (https://meet.winlab.tw/r/<name>). Share the link; any lab member can join. The room records itself from the first member in; group (a slug from list_groups) files the recording under that project in GitLab, otherwise under the member's own username. For a meeting booked ahead use schedule_room.",
+    "Opens a new meeting room now with a title and returns its name and link (https://meet.winlab.tw/r/<name>). Share the link; any lab member can join. The room records itself from the first member in; group (a slug from list_groups) files the recording under that project in GitLab, otherwise under the member's own username. agenda (one line per item) shows as a checklist the running summary ticks off. For a meeting booked ahead use schedule_room.",
   kind: "mutation",
-  input: z.object({ title, group }),
+  input: z.object({
+    title,
+    group,
+    agenda: z
+      .array(z.string().trim().min(1).max(200))
+      .max(AGENDA_MAX)
+      .optional(),
+  }),
   run: async (actor, input) => {
     const me = await member(actor.userId)
     await checkGroup(input.group)
@@ -148,6 +164,12 @@ export const createRoomAction = defineAction({
       group: input.group ?? "",
       booking: "",
       until: "",
+      agenda: withIds(
+        (input.agenda ?? []).map((text) => ({
+          text,
+          source: "booking" as const,
+        }))
+      ),
     })
     return { name, url: url(name) }
   },
@@ -172,7 +194,7 @@ export const scheduleRoom = defineAction({
   name: "schedule_room",
   title: "預約會議室",
   description:
-    "Books a meeting room ahead for a portal room booking and returns its name and link at once. The link opens 10 minutes before startsAt and stops working an hour after endsAt; the LiveKit room is created when the first member enters, recorded from the first member in, and all its recordings are filed as one under the booking. opener (a username) is only for portal, which schedules on a member's behalf.",
+    "Books a meeting room ahead for a portal room booking and returns its name and link at once. The link opens 10 minutes before startsAt and stops working an hour after endsAt; the LiveKit room is created when the first member enters, recorded from the first member in, and all its recordings are filed as one under the booking. agenda items ({text, source booking|issue, url?}) become the room's checklist; portal is asked for the current list again when the room opens. opener (a username) is only for portal, which schedules on a member's behalf.",
   kind: "mutation",
   input: z.object({
     title,
@@ -181,6 +203,7 @@ export const scheduleRoom = defineAction({
     startsAt: when,
     endsAt: when,
     opener: z.string().trim().max(64).optional(),
+    agenda: agendaList.optional(),
   }),
   run: async (actor, input) => {
     if (input.endsAt <= input.startsAt) throw new Error("結束要晚於開始")
@@ -194,6 +217,7 @@ export const scheduleRoom = defineAction({
       booking: input.booking,
       startsAt: input.startsAt,
       endsAt: input.endsAt,
+      agenda: withIds(input.agenda ?? []),
       ...who,
     })
     return { name, url: url(name) }
@@ -213,7 +237,7 @@ export const updateScheduledRoom = defineAction({
   name: "update_scheduled_room",
   title: "改預約會議室",
   description:
-    "Changes a scheduled room's title, group or time by its booking id. The link stays the same.",
+    "Changes a scheduled room's title, group, time or agenda by its booking id; a given agenda replaces the old one. The link stays the same.",
   kind: "mutation",
   input: z.object({
     booking,
@@ -221,6 +245,7 @@ export const updateScheduledRoom = defineAction({
     group,
     startsAt: when.optional(),
     endsAt: when.optional(),
+    agenda: agendaList.optional(),
   }),
   run: async (_actor, input) => {
     const row = await scheduledByBooking(input.booking)
@@ -235,6 +260,7 @@ export const updateScheduledRoom = defineAction({
         group: input.group ?? row.group,
         startsAt,
         endsAt,
+        agenda: input.agenda ? withIds(input.agenda) : row.agenda,
       })
       .where(eq(scheduledRoom.booking, input.booking))
     return { name: row.name, url: url(row.name) }
@@ -261,12 +287,22 @@ export const cancelScheduledRoom = defineAction({
 
 /** What a link to a scheduled room gets outside its window. */
 export type JoinState =
-  | { state: "ready"; title: string; serverUrl: string; token: string }
+  | {
+      state: "ready"
+      title: string
+      serverUrl: string
+      token: string
+      /** When a scheduled meeting ends; null for a room opened on the spot. */
+      endsAt: Date | null
+    }
   | { state: "early"; title: string; opensAt: Date; startsAt: Date }
   | { state: "ended"; title: string }
 
 // A scheduled room whose LiveKit room is not open: open it if the time is
-// right, otherwise say when.
+// right, otherwise say when. Portal is asked for the agenda again on the
+// way in, so issues added since the booking show; a booking portal says is
+// cancelled is cancelled here too, and portal not answering keeps the
+// stored list.
 async function openScheduled(name: string): Promise<JoinState | null> {
   const [row] = await db
     .select()
@@ -279,6 +315,20 @@ async function openScheduled(name: string): Promise<JoinState | null> {
     return { state: "early", title: row.title, opensAt, startsAt: row.startsAt }
   if (now > row.endsAt.getTime() + CLOSES_AFTER_MS)
     return { state: "ended", title: row.title }
+  const fresh = await bookingAgenda(row.booking)
+  if (fresh?.status === "cancelled") {
+    await db
+      .update(scheduledRoom)
+      .set({ cancelledAt: new Date() })
+      .where(eq(scheduledRoom.name, name))
+    return null
+  }
+  const agenda = fresh ? withIds(fresh.items) : row.agenda
+  if (fresh)
+    await db
+      .update(scheduledRoom)
+      .set({ agenda })
+      .where(eq(scheduledRoom.name, name))
   const metadata: RoomMetadata = {
     title: row.title,
     createdBy: row.createdBy,
@@ -286,9 +336,16 @@ async function openScheduled(name: string): Promise<JoinState | null> {
     group: row.group,
     booking: row.booking,
     until: stamp(row.endsAt),
+    agenda,
   }
   await createRoom(name, metadata)
-  return { state: "ready", title: row.title, serverUrl: "", token: "" }
+  return {
+    state: "ready",
+    title: row.title,
+    serverUrl: "",
+    token: "",
+    endsAt: row.endsAt,
+  }
 }
 
 export const joinRoom = defineAction({
@@ -304,24 +361,24 @@ export const joinRoom = defineAction({
       getRoom(input.name),
     ])
     let title = room?.name ?? input.name
+    let endsAt: Date | null = null
     if (room) {
-      try {
-        title = String(JSON.parse(room.metadata).title ?? "") || room.name
-      } catch {
-        title = room.name
-      }
+      const metadata = parseMetadata(room.metadata)
+      title = metadata.title || room.name
+      endsAt = unstamp(metadata.until)
     } else {
       const opened = await openScheduled(input.name)
       if (!opened) throw new Error("沒有這個會議室")
       if (opened.state !== "ready") return opened
       title = opened.title
+      endsAt = opened.endsAt
     }
     const credentials = await joinToken({
       room: input.name,
       identity: me.id,
       name: me.name,
     })
-    return { state: "ready", title, ...credentials }
+    return { state: "ready", title, endsAt, ...credentials }
   },
   mcpExcludedBecause:
     "It mints a browser credential; an agent joins a room with its own LiveKit token, not a member's.",

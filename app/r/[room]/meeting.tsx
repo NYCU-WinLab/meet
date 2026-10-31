@@ -15,6 +15,9 @@ import {
 } from "@livekit/components-react"
 import { Track } from "livekit-client"
 import {
+  CircleCheckIcon,
+  CircleDashedIcon,
+  CircleDotIcon,
   LinkIcon,
   ListChecksIcon,
   LogOutIcon,
@@ -53,13 +56,19 @@ export const CONTROLS_SLOT = "meet-controls"
 export function Meeting({
   serverUrl,
   token,
+  endsAt,
 }: {
   serverUrl: string
   token: string
+  /** When a scheduled meeting ends, for the last-10-minutes reminder. */
+  endsAt: Date | null
 }) {
   const router = useRouter()
   const [panel, setPanel] = React.useState<Panel>(null)
   const [summary, setSummary] = React.useState<Summary | null>(null)
+  const pending =
+    summary?.agenda?.filter((item) => item.status !== "done").length ?? 0
+  useAgendaReminder(endsAt, pending)
   const toggle = (name: Panel) =>
     setPanel((open) => (open === name ? null : name))
   return (
@@ -88,9 +97,9 @@ export function Meeting({
       {panel === "chat" && <Chat />}
       {panel === "summary" && <SummaryPanel summary={summary} />}
       <div className="flex justify-center md:hidden">
-        <Controls panel={panel} onToggle={toggle} />
+        <Controls panel={panel} onToggle={toggle} pending={pending} />
       </div>
-      <ControlsInCorner panel={panel} onToggle={toggle} />
+      <ControlsInCorner panel={panel} onToggle={toggle} pending={pending} />
     </LiveKitRoom>
   )
 }
@@ -261,9 +270,12 @@ type Panel = "chat" | "summary" | null
 function Controls({
   panel,
   onToggle,
+  pending,
 }: {
   panel: Panel
   onToggle: (name: Panel) => void
+  /** Agenda items not yet discussed, shown on the summary control. */
+  pending: number
 }) {
   const room = useRoomContext()
   const { isMicrophoneEnabled, isCameraEnabled, isScreenShareEnabled } =
@@ -317,8 +329,12 @@ function Controls({
           <MessageSquareIcon />
         </Control>
         <Control
-          label={panel === "summary" ? "收起摘要" : "摘要"}
+          label={
+            (panel === "summary" ? "收起摘要" : "摘要") +
+            (pending > 0 ? `，未討論 ${pending}` : "")
+          }
           active={panel === "summary"}
+          badge={pending > 0 ? pending : undefined}
           onClick={() => onToggle("summary")}
         >
           <ListChecksIcon />
@@ -365,12 +381,15 @@ function Control({
   label,
   active,
   pending,
+  badge,
   onClick,
   children,
 }: {
   label: string
   active: boolean
   pending?: boolean
+  /** A count in the corner, e.g. agenda items left. */
+  badge?: number
   onClick: () => void
   children: React.ReactNode
 }) {
@@ -385,10 +404,19 @@ function Control({
             aria-pressed={active}
             disabled={pending}
             onClick={onClick}
+            className={badge === undefined ? undefined : "relative"}
           />
         }
       >
         {children}
+        {badge !== undefined && (
+          <span
+            aria-hidden
+            className="absolute -top-2 -right-2 flex size-5 items-center justify-center rounded-full bg-destructive text-primary-foreground tabular-nums"
+          >
+            {badge}
+          </span>
+        )}
       </TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>
     </Tooltip>
@@ -398,12 +426,42 @@ function Control({
 // The running summary the summary service publishes on its text stream:
 // what the meeting is about, open questions, improvements, decisions. It is
 // rewritten every minute or so and sent again to anyone who joins late.
+type AgendaItem = {
+  id: string
+  text: string
+  url?: string
+  status: "pending" | "partial" | "done"
+  note: string
+}
+
 type Summary = {
   summary: string
   questions: string[]
   improvements: string[]
   decisions: string[]
+  /** Absent from a summary service older than the agenda. */
+  agenda?: AgendaItem[]
   updatedAt: string
+}
+
+// One toast when 10 minutes are left and items are still open.
+function useAgendaReminder(endsAt: Date | null, pending: number) {
+  const reminded = React.useRef(false)
+  React.useEffect(() => {
+    if (!endsAt || pending === 0 || reminded.current) return
+    const remind = () => {
+      if (reminded.current) return
+      reminded.current = true
+      toast(`還有 ${pending} 項沒討論，剩 10 分鐘`)
+    }
+    const wait = endsAt.getTime() - 10 * 60 * 1000 - Date.now()
+    if (wait <= 0) {
+      if (endsAt.getTime() > Date.now()) remind()
+      return
+    }
+    const timer = setTimeout(remind, wait)
+    return () => clearTimeout(timer)
+  }, [endsAt, pending])
 }
 
 function SummaryListener({
@@ -428,7 +486,10 @@ function SummaryListener({
 function SummaryPanel({ summary }: { summary: Summary | null }) {
   return (
     <aside className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto rounded-control bg-muted p-4 md:w-80 md:flex-none">
-      {!summary ? (
+      {summary?.agenda && summary.agenda.length > 0 && (
+        <AgendaList items={summary.agenda} />
+      )}
+      {!summary?.summary ? (
         <p className="text-muted-foreground">開始說話後約 1 分鐘出現摘要</p>
       ) : (
         <>
@@ -447,6 +508,53 @@ function SummaryPanel({ summary }: { summary: Summary | null }) {
         </>
       )}
     </aside>
+  )
+}
+
+const order = { pending: 0, partial: 1, done: 2 }
+const statusIcon = {
+  pending: (
+    <CircleDashedIcon aria-label="未討論" className="text-muted-foreground" />
+  ),
+  partial: <CircleDotIcon aria-label="討論中" className="text-primary" />,
+  done: <CircleCheckIcon aria-label="已討論" className="text-primary" />,
+}
+
+// The agenda as a checklist, open items first.
+function AgendaList({ items }: { items: AgendaItem[] }) {
+  const sorted = [...items].sort((a, b) => order[a.status] - order[b.status])
+  return (
+    <section className="flex flex-col gap-2">
+      <h2 className="text-muted-foreground">議程</h2>
+      <ul className="flex flex-col gap-2">
+        {sorted.map((item) => (
+          <li key={item.id} className="flex gap-2">
+            <span className="mt-0.5 shrink-0 [&_svg]:size-4">
+              {statusIcon[item.status]}
+            </span>
+            <div className="flex min-w-0 flex-col">
+              {item.url ? (
+                <a
+                  href={item.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="break-words underline-offset-4 hover:underline"
+                >
+                  {item.text}
+                </a>
+              ) : (
+                <span className="break-words">{item.text}</span>
+              )}
+              {item.note && (
+                <span className="break-words text-muted-foreground">
+                  {item.note}
+                </span>
+              )}
+            </div>
+          </li>
+        ))}
+      </ul>
+    </section>
   )
 }
 

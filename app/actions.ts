@@ -6,12 +6,16 @@ import { requireActor } from "@/lib/auth/session"
 
 // The writes a page makes, each one an action run as the signed-in member.
 // Errors come back as a message for a toast, never thrown into the page.
-export async function createRoom(title: string, group?: string) {
+export async function createRoom(
+  title: string,
+  group?: string,
+  agenda?: string[]
+) {
   const actor = await requireActor("/")
   try {
     return {
       ok: true as const,
-      ...(await runAction(createRoomAction, actor, { title, group })),
+      ...(await runAction(createRoomAction, actor, { title, group, agenda })),
     }
   } catch (error) {
     return { ok: false as const, error: errorMessage(error) }

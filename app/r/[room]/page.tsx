@@ -71,7 +71,11 @@ export default async function RoomPage({ params }: PageProps<"/r/[room]">) {
       }
       page={{ label: joined.title, href: `/r/${room}`, tip: "" }}
     >
-      <Meeting serverUrl={joined.serverUrl} token={joined.token} />
+      <Meeting
+        serverUrl={joined.serverUrl}
+        token={joined.token}
+        endsAt={joined.endsAt}
+      />
     </MeetShell>
   )
 }

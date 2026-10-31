@@ -11,6 +11,8 @@ import {
   EncodedFileOutput,
 } from "livekit-server-sdk"
 
+import type { AgendaItem } from "@/lib/agenda"
+
 const url = () => process.env.LIVEKIT_URL!
 const apiKey = () => process.env.LIVEKIT_API_KEY!
 const apiSecret = () => process.env.LIVEKIT_API_SECRET!
@@ -38,6 +40,8 @@ export type RoomMetadata = {
   /** When the booking ends, UTC as 2006-01-02T150405, or "". The egress
    * uploader holds the booking's recordings until then and joins them. */
   until: string
+  /** The scheduled meeting's agenda; [] for a room opened on the spot. */
+  agenda: AgendaItem[]
 }
 
 /** What the recording is filed under: the group, else the opener. */
@@ -58,7 +62,8 @@ export type RoomSummary = {
 const isMember = (p: { kind?: number; permission?: { hidden?: boolean } }) =>
   (p.kind === 0 || p.kind === undefined) && !p.permission?.hidden
 
-function parseMetadata(raw: string): RoomMetadata {
+/** A room's metadata as meet wrote it, with defaults for missing fields. */
+export function parseMetadata(raw: string): RoomMetadata {
   try {
     const data = JSON.parse(raw) as Partial<RoomMetadata>
     return {
@@ -68,6 +73,7 @@ function parseMetadata(raw: string): RoomMetadata {
       group: String(data.group ?? ""),
       booking: String(data.booking ?? ""),
       until: String(data.until ?? ""),
+      agenda: Array.isArray(data.agenda) ? data.agenda : [],
     }
   } catch {
     return {
@@ -77,6 +83,7 @@ function parseMetadata(raw: string): RoomMetadata {
       group: "",
       booking: "",
       until: "",
+      agenda: [],
     }
   }
 }
@@ -138,6 +145,14 @@ export function recordingPath(name: string, metadata: RoomMetadata) {
 /** Formats a time the way egress stamps {time}: UTC, 2006-01-02T150405. */
 export const stamp = (date: Date) =>
   date.toISOString().replace(/:/g, "").slice(0, 17)
+
+/** The Date a stamp names, or null for "". */
+export function unstamp(value: string) {
+  const match = /^(\d{4}-\d{2}-\d{2})T(\d{2})(\d{2})(\d{2})$/.exec(value)
+  return match
+    ? new Date(`${match[1]}T${match[2]}:${match[3]}:${match[4]}Z`)
+    : null
+}
 
 /** Opens a room that stays up to 10 minutes while empty. */
 export async function createRoom(name: string, metadata: RoomMetadata) {

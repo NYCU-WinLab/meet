@@ -27,6 +27,7 @@ No account to make and nothing to install: lab members sign in with their lab ac
 
 - **Opens a room** with a title; the link is a short id, and any member can join it.
 - **Books a room ahead** for a portal room booking: the link exists at once, opens 10 minutes before the meeting and dies an hour after it ends.
+- **Carries an agenda**: a booked room gets its items from portal (the booking's lines and the epic's open issues), asked again when the room opens; a room opened on the spot takes one line per item. The summary panel shows them as a checklist the running summary ticks off, and warns once when 10 minutes are left with items open.
 - **Meets in the browser**: camera, microphone and screen share, with the speaker ringed and muted members marked.
 - **Shows who is where**: the room list says who is in each room and refreshes as people come and go.
 - **Ends a room** for everyone; an empty room closes by itself after 10 minutes.
@@ -83,6 +84,10 @@ webhook:
 | `create_room` | Opens a room now and returns its link |
 | `schedule_room`, `update_scheduled_room`, `cancel_scheduled_room` | A room booked ahead, by portal booking id |
 | `end_room` | Closes a room for everyone |
+
+## Agenda
+
+`schedule_room` and `update_scheduled_room` take `agenda`, up to 30 items of `{text ≤ 200, source: "booking" | "issue", url?}`; a given list replaces the old one. Each item gets an id, the first 8 hex of `sha256(source + "\n" + (url ?? text))`, so pushing the same items again keeps their status. When the room opens, meet asks portal's `get_booking_agenda` (5 s); a cancelled booking is cancelled here too, and no answer keeps the stored list. The items ride in the room metadata; the summary service marks each `pending`, `partial` or `done` with a note of at most 40 characters, and never adds, drops or renames one. Nothing about coverage is stored: the final record's ✅/⬜ is written by winlab-helper from the full transcript.
 
 ## Recording
 

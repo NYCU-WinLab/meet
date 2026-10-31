@@ -6,6 +6,7 @@ import { toast } from "sonner"
 import { FormDialog, FormField } from "@/components/form-dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 import {
   Select,
   SelectContent,
@@ -39,9 +40,16 @@ export function CreateRoom({
       submitLabel="開始"
       onSubmit={async (data) => {
         const group = String(data.get("group") ?? "")
+        const agenda = String(data.get("agenda") ?? "")
+          .split("\n")
+          .map((line) =>
+            line.replace(/^\s*(?:[-*\u2022]|\d+[.)])\s*/, "").trim()
+          )
+          .filter(Boolean)
         const result = await createRoom(
           String(data.get("title") ?? ""),
-          group || undefined
+          group || undefined,
+          agenda.length > 0 ? agenda : undefined
         )
         if (!result.ok) {
           toast.error(result.error)
@@ -51,10 +59,13 @@ export function CreateRoom({
       }}
     >
       <FormField label="會議名稱" required>
-        <Input name="title" maxLength={40} autoFocus />
+        <Input name="title" maxLength={80} autoFocus />
       </FormField>
       <FormField label="錄影歸檔到">
         <GroupSelect items={items} />
+      </FormField>
+      <FormField label="議程">
+        <Textarea name="agenda" rows={4} placeholder="一行一項" />
       </FormField>
     </FormDialog>
   )

@@ -1,0 +1,1 @@
+ALTER TABLE "scheduled_rooms" ADD COLUMN "agenda" jsonb DEFAULT '[]'::jsonb NOT NULL;
