@@ -77,17 +77,19 @@ function Lobby({
     defaults: { audioEnabled: true, videoEnabled: true },
   })
   const [failed, setFailed] = React.useState(false)
-  const tracks = usePreviewTracks(
-    {
-      audio: userChoices.audioEnabled
-        ? { deviceId: userChoices.audioDeviceId || undefined }
-        : false,
-      video: userChoices.videoEnabled
-        ? { deviceId: userChoices.videoDeviceId || undefined }
-        : false,
-    },
-    () => setFailed(true)
+  // A new options object restarts the devices, so it changes only with a
+  // choice.
+  const { audioEnabled, videoEnabled, audioDeviceId, videoDeviceId } =
+    userChoices
+  const options = React.useMemo(
+    () => ({
+      audio: audioEnabled ? { deviceId: audioDeviceId || undefined } : false,
+      video: videoEnabled ? { deviceId: videoDeviceId || undefined } : false,
+    }),
+    [audioEnabled, videoEnabled, audioDeviceId, videoDeviceId]
   )
+  const onError = React.useCallback(() => setFailed(true), [])
+  const tracks = usePreviewTracks(options, onError)
   const video = tracks?.find((t) => t.kind === Track.Kind.Video) as
     LocalVideoTrack | undefined
   const audio = tracks?.find((t) => t.kind === Track.Kind.Audio) as
