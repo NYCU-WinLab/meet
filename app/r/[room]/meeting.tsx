@@ -632,10 +632,16 @@ function Chat() {
         )}
         {chatMessages.map((message) => {
           const mine = message.from?.identity === localParticipant.identity
+          // The agent is hidden, so its replies carry a mark instead of a name.
+          const agent = message.attributes?.["meet.agent"] === "1"
           return (
             <li key={message.id ?? message.timestamp} className="flex flex-col">
               <span className="text-muted-foreground">
-                {mine ? "我" : (message.from?.name ?? message.from?.identity)}
+                {mine
+                  ? "我"
+                  : agent
+                    ? "agent"
+                    : (message.from?.name ?? message.from?.identity)}
               </span>
               <span className="break-words whitespace-pre-wrap">
                 {message.message}
@@ -649,7 +655,7 @@ function Chat() {
         <Input
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
-          placeholder="說點什麼"
+          placeholder="說點什麼，@agent 可以發問"
           aria-label="訊息"
           maxLength={2000}
         />
