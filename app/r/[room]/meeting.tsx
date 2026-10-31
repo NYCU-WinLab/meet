@@ -47,9 +47,11 @@ import {
 } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 
+import type { MediaChoices } from "./lobby"
+
 // One meeting: everyone's camera (or their name when it is off), a shared
 // screen when there is one, and the member's own controls. Camera and
-// microphone start on; the browser asks once.
+// microphone start as the member left them in the lobby.
 /** The top-right corner the page leaves empty for the controls. */
 export const CONTROLS_SLOT = "meet-controls"
 
@@ -57,11 +59,13 @@ export function Meeting({
   serverUrl,
   token,
   endsAt,
+  choices,
 }: {
   serverUrl: string
   token: string
   /** When a scheduled meeting ends, for the last-10-minutes reminder. */
   endsAt: Date | null
+  choices: MediaChoices
 }) {
   const router = useRouter()
   const [open, setOpen] = React.useState(false)
@@ -76,6 +80,12 @@ export function Meeting({
       serverUrl={serverUrl}
       token={token}
       connect
+      audio={
+        choices.audio ? { deviceId: choices.audioDeviceId || undefined } : false
+      }
+      video={
+        choices.video ? { deviceId: choices.videoDeviceId || undefined } : false
+      }
       onDisconnected={() => router.push("/")}
       onError={(error) => toast.error(error.message)}
       onMediaDeviceFailure={(failure) => {
