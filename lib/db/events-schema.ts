@@ -2,6 +2,7 @@
 // history. LiveKit itself forgets a room the moment it closes.
 import {
   bigint,
+  boolean,
   index,
   integer,
   pgTable,
@@ -24,6 +25,9 @@ export const livekitEvent = pgTable(
     participant: text(),
     /** How long they stayed, on participant_left. */
     participantSeconds: integer(),
+    /** On participant events: a member, not the recorder, an agent or the
+     * hidden summary participant. Null on rows from before it was kept. */
+    member: boolean(),
     egressId: text(),
     /** EgressStatus name, on egress events: EGRESS_COMPLETE, EGRESS_FAILED, … */
     egressStatus: text(),

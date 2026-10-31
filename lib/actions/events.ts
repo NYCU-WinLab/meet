@@ -24,6 +24,9 @@ export async function recordEvent(event: WebhookEvent) {
       event.event === "participant_left" && participant && !participant.kind
         ? Math.max(0, Number(event.createdAt) - Number(participant.joinedAt))
         : null,
+    member: participant
+      ? !participant.kind && !participant.permission?.hidden
+      : null,
     egressId: egress?.egressId ?? null,
     egressStatus: egress ? EgressStatus[egress.status] : null,
     egressSeconds:
