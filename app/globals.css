@@ -3,6 +3,8 @@
 @import "shadcn/tailwind.css";
 
 @custom-variant dark (&:is(.dark *));
+/* A window too short for a full-size lobby preview. */
+@custom-variant short (@media (max-height: 760px));
 
 @theme inline {
   --color-background: var(--background);
