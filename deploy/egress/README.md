@@ -24,10 +24,11 @@ Files for the 2 LiveKit Egress VMs (`egress01`, `egress02`). Both run the same c
 
 ## Empty stretches cut
 
-Before a recording ships or is held, `egress-upload` asks meet's `recording_gaps` (service key `egress` in meet's `SERVICE_KEYS`, `MEET_SERVICE_KEY` here) when no member was in the room, and cuts every stretch of 10 s or longer, keeping 2 s on each side, with a stream copy. The transcript, subtitles and notes are made from the cut file, so their times match it.
+Before a recording ships or is held, `egress-upload` asks meet's `recording_gaps` (service key `egress` in meet's `SERVICE_KEYS`, `MEET_SERVICE_KEY` here) when no member was in the room, by egress id and in seconds of the file itself, and cuts every stretch of 10 s or longer, keeping 2 s on each side, with a stream copy. The transcript, subtitles and notes are made from the cut file, so their times match it.
 
 - Nothing to cut, the API unreachable, a plan that keeps under 5 s, or an output whose length is off: the recording ships whole.
-- `<file>.trimmed` marks a cut file, so a retry never cuts it twice.
+- meet has not heard the recording end yet: the file waits for the next run, up to 10 minutes, then ships whole.
+- `<file>.trimmed` is written before the cut file replaces the original, so a retry never cuts twice.
 
 ## Hand-off v2
 
