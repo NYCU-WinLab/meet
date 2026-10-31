@@ -49,7 +49,7 @@ for key, label in labels:
 print("\n".join(out))
 PY
 
-urlencode() { python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1]))' "$1"; }
+urlencode() { python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$1"; }
 sha_of() { [ -s "$1" ] && sha256sum "$1" | cut -c1-64; }
 # The recording's folder as a WebDAV path: meet/<month>/<stem>/ for a
 # pending file with dir=1, the month folder for one written before that.
@@ -99,7 +99,9 @@ finish() { # <pending> <job> <srt> <transcript status> <notes status> <tmp dir>
 # starts with @ or <, and a title may.
 hand_off() { # <pending>; needs the pending file's fields in scope
   local pending=$1 mp4="$STATE/$job.mp4" size sha path root
-  [ -n "${GL_TRIGGER_TOKEN:-}" ] && [ -n "${GL_TRIGGER_URL:-}" ] && [ -n "${HELPER_RELAY_SECRET:-}" ] || return 0
+  [ -n "${GL_TRIGGER_TOKEN:-}" ] && [ -n "${GL_TRIGGER_URL:-}" ] || return 0
+  # Unsigned, the helper refuses it: keep the recording until the secret is set.
+  [ -n "${HELPER_RELAY_SECRET:-}" ] || { echo "HELPER_RELAY_SECRET unset, helper not told yet: $stem" >&2; return 1; }
   [ -f "$mp4" ] || { echo "no local MP4 to hand off: $stem" >&2; return 0; }
   size=$(stat -c %s "$mp4"); sha=$(sha256sum "$mp4" | cut -c1-64)
   # Under about 5 MB the helper only stores it anyway.
@@ -125,7 +127,9 @@ hand_off() { # <pending>; needs the pending file's fields in scope
     [SUBJECT]=${subject:-$stem} [PERSON]=${person:-} [GROUP_NAME]=${group:-}
     [START_TIME]=${start:-} [END_TIME]=${end:-} [BOOKING_REQUEST_ID]=${booking:-})
   if [ -n "${dir:-}" ]; then
-    v[DL_URL]="$root$(urlencode "$stem").mp4"
+    # The helper refuses ".." anywhere in the file name, and reads the path
+    # as sent, so dots in the stem go encoded.
+    v[DL_URL]="$root$(urlencode "$stem" | sed 's/\./%2E/g').mp4"
     v[RELAY_VERSION]=2 v[TX_JOB_ID]=$job
     v[TRANSCRIPT_STATUS]=${tx_status:-failed} v[TRANSCRIPT_SHA256]=${sha_txt:-} v[SUBTITLE_SHA256]=${sha_srt:-}
     v[NOTES_STATUS]=${notes_status:-none} v[NOTES_SHA256]=${sha_notes_md:-} v[NOTES_JSON_SHA256]=${sha_notes_json:-}
@@ -169,12 +173,12 @@ for pending in "$STATE"/*.pending; do
   tmp=$(mktemp -d)
   # A recording with no speech has an empty transcript: nothing to put next
   # to it, the hand-off still happens.
-  if tx -o "$tmp/t.txt" "$TX/api/jobs/$job/transcript.txt" && [ ! -s "$tmp/t.txt" ]; then
+  if tx -f -o "$tmp/t.txt" "$TX/api/jobs/$job/transcript.txt" && [ ! -s "$tmp/t.txt" ]; then
     echo "no speech: $stem"; : > "$tmp/t.srt"; finish "$pending" "$job" "$tmp/t.srt" empty none "$tmp"; rm -rf "${tmp:?}"; continue
   fi
   ok=1
   for ext in txt srt; do
-    tx -o "$tmp/t.$ext" "$TX/api/jobs/$job/transcript.$ext" && [ -s "$tmp/t.$ext" ] || { ok=0; break; }
+    tx -f -o "$tmp/t.$ext" "$TX/api/jobs/$job/transcript.$ext" && [ -s "$tmp/t.$ext" ] || { ok=0; break; }
     put "$tmp/t.$ext" "$(remote_dir)/$(urlencode "$stem").$ext" || ok=0
   done
   if [ "$ok" = 1 ]; then
