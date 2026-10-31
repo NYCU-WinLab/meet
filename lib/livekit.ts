@@ -53,6 +53,11 @@ export type RoomSummary = {
   participants: { identity: string; name: string }[]
 }
 
+/** A member in the room: not egress, not an agent, and not the hidden
+ * summary participant that sits in every room. */
+const isMember = (p: { kind?: number; permission?: { hidden?: boolean } }) =>
+  (p.kind === 0 || p.kind === undefined) && !p.permission?.hidden
+
 function parseMetadata(raw: string): RoomMetadata {
   try {
     const data = JSON.parse(raw) as Partial<RoomMetadata>
@@ -91,8 +96,7 @@ export async function listRooms(): Promise<RoomSummary[]> {
         createdBy: metadata.createdBy,
         createdAt: new Date(Number(room.creationTime) * 1000),
         participants: participants
-          // Agents and egress are not members.
-          .filter((p) => p.kind === 0 || p.kind === undefined)
+          .filter(isMember)
           .map((p) => ({ identity: p.identity, name: p.name || p.identity })),
       }
     })
@@ -100,8 +104,8 @@ export async function listRooms(): Promise<RoomSummary[]> {
   return summaries.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
 }
 
-// A room records itself from the moment a second member is in it (the
-// webhook starts the egress) until it closes: the egress service composes
+// A room records itself from the moment a member is in it (the webhook
+// starts the egress) until it closes: the egress service composes
 // the grid into an MP4. The file lands on the egress machine, whose
 // uploader moves it to Nextcloud and hands the fields in the name to the
 // lab's GitLab helper (see README, Recording):
@@ -149,7 +153,7 @@ export async function createRoom(name: string, metadata: RoomMetadata) {
 /** Members in a room now (not egress, not agents). */
 export async function memberCount(name: string) {
   const participants = await api().room.listParticipants(name)
-  return participants.filter((p) => p.kind === 0 || p.kind === undefined).length
+  return participants.filter(isMember).length
 }
 
 /** Starts the room's recording unless one is already running. */

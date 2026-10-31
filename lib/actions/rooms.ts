@@ -127,7 +127,7 @@ export const createRoomAction = defineAction({
   name: "create_room",
   title: "開會議室",
   description:
-    "Opens a new meeting room now with a title and returns its name and link (https://meet.winlab.tw/r/<name>). Share the link; any lab member can join. The room records itself once two members are in it; group (a slug from list_groups) files the recording under that project in GitLab, otherwise under the member's own username. For a meeting booked ahead use schedule_room.",
+    "Opens a new meeting room now with a title and returns its name and link (https://meet.winlab.tw/r/<name>). Share the link; any lab member can join. The room records itself from the first member in; group (a slug from list_groups) files the recording under that project in GitLab, otherwise under the member's own username. For a meeting booked ahead use schedule_room.",
   kind: "mutation",
   input: z.object({ title, group }),
   run: async (actor, input) => {
@@ -172,7 +172,7 @@ export const scheduleRoom = defineAction({
   name: "schedule_room",
   title: "預約會議室",
   description:
-    "Books a meeting room ahead for a portal room booking and returns its name and link at once. The link opens 10 minutes before startsAt and stops working an hour after endsAt; the LiveKit room is created when the first member enters, recorded once two are in, and all its recordings are filed as one under the booking. opener (a username) is only for portal, which schedules on a member's behalf.",
+    "Books a meeting room ahead for a portal room booking and returns its name and link at once. The link opens 10 minutes before startsAt and stops working an hour after endsAt; the LiveKit room is created when the first member enters, recorded from the first member in, and all its recordings are filed as one under the booking. opener (a username) is only for portal, which schedules on a member's behalf.",
   kind: "mutation",
   input: z.object({
     title,
