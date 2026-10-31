@@ -4,6 +4,8 @@ import {
   LiveKitRoom,
   RoomAudioRenderer,
   useChat,
+  useConnectionQualityIndicator,
+  useConnectionState,
   useIsMuted,
   useIsRecording,
   useIsSpeaking,
@@ -14,7 +16,7 @@ import {
   VideoTrack,
   type TrackReferenceOrPlaceholder,
 } from "@livekit/components-react"
-import { Track } from "livekit-client"
+import { ConnectionQuality, ConnectionState, Track } from "livekit-client"
 import {
   CircleCheckIcon,
   CircleDashedIcon,
@@ -29,6 +31,7 @@ import {
   PinIcon,
   PinOffIcon,
   SendIcon,
+  SignalLowIcon,
   VideoIcon,
   VideoOffIcon,
 } from "lucide-react"
@@ -95,6 +98,8 @@ export function Meeting({
     >
       <RoomAudioRenderer />
       <SummaryListener onSummary={setSummary} />
+      <Shortcuts />
+      <Reconnecting />
       {/* A phone shows the open panel instead of the stage; wider screens show both. */}
       <div
         className={cn(
@@ -244,6 +249,7 @@ function Tile({
         {!screen && micMuted && (
           <MicOffIcon aria-label="麥克風已關" className="size-4 shrink-0" />
         )}
+        {!screen && <WeakSignal participant={participant} />}
       </div>
       <Button
         variant="ghost"
@@ -299,6 +305,11 @@ function Controls({
       // The browser's own "stop sharing" bar ends the share without us.
       if (wasSharing.current && !enabled && !isUserInitiated)
         toast("已停止分享螢幕")
+      // Safari shares a screen without its sound (#16).
+      if (enabled && !wasSharing.current && isSafari())
+        toast("Safari 分享螢幕不含聲音", {
+          description: "要分享影片或簡報的聲音，請改用 Chrome。",
+        })
       wasSharing.current = enabled
     },
   })
@@ -309,7 +320,7 @@ function Controls({
         <RecordingState />
         <Divider />
         <Control
-          label={isMicrophoneEnabled ? "關麥克風" : "開麥克風"}
+          label={`${isMicrophoneEnabled ? "關麥克風" : "開麥克風"}（${MOD}D）`}
           active={isMicrophoneEnabled}
           pending={mic.pending}
           onClick={() => mic.toggle()}
@@ -317,7 +328,7 @@ function Controls({
           {isMicrophoneEnabled ? <MicIcon /> : <MicOffIcon />}
         </Control>
         <Control
-          label={isCameraEnabled ? "關鏡頭" : "開鏡頭"}
+          label={`${isCameraEnabled ? "關鏡頭" : "開鏡頭"}（${MOD}E）`}
           active={isCameraEnabled}
           pending={camera.pending}
           onClick={() => camera.toggle()}
@@ -380,6 +391,102 @@ function Controls({
         </Tooltip>
       </div>
     </TooltipProvider>
+  )
+}
+
+const isSafari = () =>
+  /^((?!chrome|chromium|crios|fxios|edg|android).)*safari/i.test(
+    navigator.userAgent
+  )
+
+const MOD =
+  typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform)
+    ? "⌘"
+    : "Ctrl+"
+
+// Keys: ⌘D or Ctrl+D the microphone, ⌘E or Ctrl+E the camera, and Space
+// held down talks while the microphone is off. Typing in a field is left
+// alone.
+function Shortcuts() {
+  const mic = useTrackToggle({ source: Track.Source.Microphone })
+  const camera = useTrackToggle({ source: Track.Source.Camera })
+  const holding = React.useRef(false)
+  React.useEffect(() => {
+    const typing = (target: EventTarget | null) =>
+      target instanceof HTMLElement &&
+      (target.isContentEditable ||
+        ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))
+    const down = (event: KeyboardEvent) => {
+      if (typing(event.target)) return
+      const key = event.key.toLowerCase()
+      if (
+        (event.metaKey || event.ctrlKey) &&
+        !event.shiftKey &&
+        !event.altKey
+      ) {
+        if (key === "d") {
+          event.preventDefault()
+          void mic.toggle()
+        } else if (key === "e") {
+          event.preventDefault()
+          void camera.toggle()
+        }
+        return
+      }
+      if (key === " " && !event.repeat && !mic.enabled) {
+        event.preventDefault()
+        holding.current = true
+        void mic.toggle(true)
+      }
+    }
+    const up = (event: KeyboardEvent) => {
+      if (event.key === " " && holding.current) {
+        holding.current = false
+        void mic.toggle(false)
+      }
+    }
+    window.addEventListener("keydown", down)
+    window.addEventListener("keyup", up)
+    return () => {
+      window.removeEventListener("keydown", down)
+      window.removeEventListener("keyup", up)
+    }
+  }, [mic, camera])
+  return null
+}
+
+// A bar across the top while the connection is lost and coming back.
+function Reconnecting() {
+  const state = useConnectionState()
+  const lost =
+    state === ConnectionState.Reconnecting ||
+    state === ConnectionState.SignalReconnecting
+  if (!lost) return null
+  return (
+    <div
+      role="status"
+      className="fixed inset-x-0 top-0 z-50 flex justify-center bg-destructive py-1 text-primary-foreground"
+    >
+      連線中斷，重新連線中
+    </div>
+  )
+}
+
+// A mark on a tile whose connection is poor, so a frozen picture or broken
+// voice has a visible cause.
+function WeakSignal({
+  participant,
+}: {
+  participant: TrackReferenceOrPlaceholder["participant"]
+}) {
+  const { quality } = useConnectionQualityIndicator({ participant })
+  if (quality !== ConnectionQuality.Poor && quality !== ConnectionQuality.Lost)
+    return null
+  return (
+    <SignalLowIcon
+      aria-label="連線不穩"
+      className="size-4 shrink-0 text-destructive"
+    />
   )
 }
 
