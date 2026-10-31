@@ -100,7 +100,84 @@ ship() { # <local_path> <name>
   return 0
 }
 
-# New recordings: ship at once, or hold the parts of a booking.
+# Cuts the time no member was in the room out of a recording, in place:
+# the stretches meet's recording_gaps reports, 10 s or longer, less 2 s on
+# each side. A stream copy cuts at keyframes, so a cut may keep a second or
+# two more. Anything unexpected keeps the recording whole. A marker file
+# stops a retry from cutting an already cut recording again.
+trim() { # <local_path> <manifest>; needs room in scope
+  local local_path=$1 manifest=$2 plan out list duration kept cuts got
+  [ -n "${MEET_URL:-}" ] && [ -n "${MEET_SERVICE_KEY:-}" ] && [ -n "${room:-}" ] || return 0
+  [ -e "$local_path.trimmed" ] && return 0
+  plan=$(MEET_URL=$MEET_URL MEET_SERVICE_KEY=$MEET_SERVICE_KEY python3 -c "$TRIM_PLAN" "$local_path" "$manifest" "$room") \
+    || { echo "trim plan failed, keeping it whole: $(basename "$local_path")" >&2; return 0; }
+  [ -n "$plan" ] || return 0
+  read -r duration kept cuts <<< "$(head -1 <<< "$plan")"
+  list=$(mktemp)
+  out="${local_path%.mp4}.trim.mp4"
+  tail -n +2 <<< "$plan" | while read -r a b; do
+    printf "file '%s'\ninpoint %s\noutpoint %s\n" "${local_path//\'/\'\\\'\'}" "$a" "$b"
+  done > "$list"
+  if ffmpeg -nostdin -loglevel error -y -f concat -safe 0 -i "$list" -c copy -movflags +faststart "$out" \
+    && got=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$out") \
+    && python3 -c 'import sys; got, kept = map(float, sys.argv[1:]); sys.exit(0 if abs(got - kept) <= max(10, kept * 0.05) else 1)' "$got" "$kept"; then
+    mv -f "$out" "$local_path"
+    : > "$local_path.trimmed"
+    echo "trimmed: $(basename "$local_path") ${duration%.*}s -> ${got%.*}s ($cuts gaps)"
+  else
+    echo "trim failed, keeping it whole: $(basename "$local_path")" >&2
+    rm -f "$out"
+  fi
+  rm -f "$list"
+  return 0
+}
+
+# Prints "<duration> <kept> <cuts>" and then one "<from> <to>" line per part
+# to keep, in seconds of the file; nothing when there is nothing to cut.
+TRIM_PLAN='
+import json, os, subprocess, sys, urllib.request
+path, manifest, room = sys.argv[1:4]
+MIN_GAP, PAD = 10, 2
+m = json.load(open(manifest))
+f = next((x for x in m.get("files", []) if os.path.basename(x.get("filename", "")) == os.path.basename(path)), m)
+start = int(f.get("started_at") or m.get("started_at") or 0) / 1e9
+if not start:
+    sys.exit(0)
+duration = float(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", path],
+                                capture_output=True, text=True, check=True).stdout.strip())
+req = urllib.request.Request(
+    os.environ["MEET_URL"].rstrip("/") + "/api/actions/recording_gaps",
+    data=json.dumps({"room": room, "from": int(start), "to": int(start + duration) + 1}).encode(),
+    headers={"Authorization": "Bearer " + os.environ["MEET_SERVICE_KEY"], "content-type": "application/json"})
+gaps = json.load(urllib.request.urlopen(req, timeout=20))["gaps"]
+cuts = []
+for g in gaps:
+    a, b = g["from"] - start, g["to"] - start
+    if b - a < MIN_GAP:
+        continue
+    a = 0.0 if a <= 0 else a + PAD
+    b = duration if b >= duration - 1 else b - PAD
+    if b > a:
+        cuts.append((max(0.0, a), min(duration, b)))
+if not cuts:
+    sys.exit(0)
+keep, t = [], 0.0
+for a, b in cuts:
+    if a > t:
+        keep.append((t, a))
+    t = max(t, b)
+if t < duration:
+    keep.append((t, duration))
+kept = sum(b - a for a, b in keep)
+if kept < 5:
+    sys.exit(0)  # nobody in it at all: more likely the events are missing
+print(f"{duration:.1f} {kept:.1f} {len(cuts)}")
+for a, b in keep:
+    print(f"{a:.3f} {b:.3f}")
+'
+
+# New recordings: cut the empty stretches, then ship at once, or hold the
+# parts of a booking.
 for manifest in "$OUT"/EG_*.json; do
   remaining=0
   while IFS= read -r name; do
@@ -108,14 +185,16 @@ for manifest in "$OUT"/EG_*.json; do
     local_path="$OUT/$name"
     [ -f "$local_path" ] || continue
     eval "$(fields "$name" "$manifest")"
+    trim "$local_path" "$manifest"
     if [ -n "$booking" ] && [ -n "$until" ]; then
       mkdir -p "$HOLD/$booking"
       fields "$name" "$manifest" > "$HOLD/$booking/$name.fields"
       mv "$local_path" "$HOLD/$booking/$name"
+      rm -f "$local_path.trimmed"
       echo "held for booking $booking until $(date -d "@$((until + 3600))" +%FT%T): $name"
       continue
     fi
-    ship "$local_path" "$name" || remaining=1
+    if ship "$local_path" "$name"; then rm -f "$local_path.trimmed"; else remaining=1; fi
   done < <(listed "$manifest")
   [ "$remaining" = 0 ] && rm -f "$manifest"
 done

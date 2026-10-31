@@ -22,6 +22,13 @@ Files for the 2 LiveKit Egress VMs (`egress01`, `egress02`). Both run the same c
 4. Parts of one booking wait in `/var/lib/egress-hold/<booking>/` until 1 hour after the booking ends, then ffmpeg joins them.
 5. `egress-transcribe` puts the transcript, subtitles and notes next to the MP4 (`<stem>.txt`, `.srt`, `.notes.md`, `.notes.json`), then sends the hand-off to winlab-helper's trigger.
 
+## Empty stretches cut
+
+Before a recording ships or is held, `egress-upload` asks meet's `recording_gaps` (service key `egress` in meet's `SERVICE_KEYS`, `MEET_SERVICE_KEY` here) when no member was in the room, and cuts every stretch of 10 s or longer, keeping 2 s on each side, with a stream copy. The transcript, subtitles and notes are made from the cut file, so their times match it.
+
+- Nothing to cut, the API unreachable, a plan that keeps under 5 s, or an output whose length is off: the recording ships whole.
+- `<file>.trimmed` marks a cut file, so a retry never cuts it twice.
+
 ## Hand-off v2
 
 The helper gets a read-only, password share of the recording's folder for 6 days and one signed trigger. It fetches the MP4 and each sidecar beside it, and checks them against the signed hashes.
