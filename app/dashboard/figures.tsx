@@ -17,7 +17,7 @@ const sparkConfig = {
   value: { label: "每週", color: "primary" },
 } satisfies ChartConfig
 
-/** "比上週 +20%", or the bare count when last week had none. */
+/** The change since last week in percent, or last week's zero. */
 function versus({ value, last }: Trend) {
   if (last === 0) return `上週 0`
   const change = Math.round(((value - last) / last) * 100)
@@ -35,7 +35,7 @@ export function TrendCard({
   label: string
   unit: string
   trend: Trend
-  note: string
+  note?: string
 }) {
   const data = trend.weekly.map((value, week) => ({ week, value }))
   return (
@@ -66,7 +66,7 @@ export function TrendCard({
           />
         </AreaChart>
       </ChartContainer>
-      <span className="text-muted-foreground">{note}</span>
+      {note && <span className="text-muted-foreground">{note}</span>}
     </div>
   )
 }

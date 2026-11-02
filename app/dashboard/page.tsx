@@ -35,17 +35,12 @@ export default async function DashboardPage() {
             trend={data.meetings}
             note={`平均 ${thisWeek.avgMinutes} 分鐘、${thisWeek.avgMembers} 人`}
           />
-          <TrendCard
-            label="本週人小時"
-            unit="小時"
-            trend={data.memberHours}
-            note="每個人在會議裡的時間加總"
-          />
+          <TrendCard label="本週人小時" unit="小時" trend={data.memberHours} />
           <TrendCard
             label="本週滿格"
             unit="小時"
             trend={data.fullHours}
-            note={`${now.maxRooms} 間都在用的時間，尖峰同時 ${thisWeek.peakRooms} 間`}
+            note={`尖峰同時 ${thisWeek.peakRooms} 間`}
           />
         </section>
         <section className="flex flex-col gap-6">
