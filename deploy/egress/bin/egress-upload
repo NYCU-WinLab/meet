@@ -63,6 +63,28 @@ urlencode() { python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys
 # transcript, subtitles and notes sit beside it and one folder share hands
 # all of them to the helper. Needs the fields in scope. Returns 1 when the
 # file must stay for a retry.
+# Tells meet where the recording is, so the members it belongs to find it
+# on meet.winlab.tw/recordings. Needs the fields in scope. A failure is
+# logged and never stops the upload: the file is already in Nextcloud.
+file_with_meet() { # <folder> <stem> <bytes> <mtime>
+  [ -n "${MEET_URL:-}" ] && [ -n "${MEET_SERVICE_KEY:-}" ] || return 0
+  local body code
+  body=$(python3 - "$1" "$2" "$3" "$4" "$room" "$egress" "$start" "$end" "$group" "$person" "$booking" "$subject" <<'PY'
+import json, sys
+folder, stem, size, mtime, room, egress, start, end, group, person, booking, subject = sys.argv[1:]
+start = start or mtime
+print(json.dumps(dict(
+    id=egress or f"{room or stem}@{start}", room=room or stem, title=subject,
+    group=group, opener=person, booking=booking, folder=folder, stem=stem,
+    startedAt=start, endedAt=end or mtime, bytes=int(size or 0))))
+PY
+) || return 0
+  code=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 15 \
+    -H "Authorization: Bearer $MEET_SERVICE_KEY" -H "content-type: application/json" \
+    -d "$body" "${MEET_URL%/}/api/actions/file_recording")
+  [ "$code" = 200 ] || echo "meet file_recording failed ($code): $2" >&2
+}
+
 ship() { # <local_path> <name>
   local local_path=$1 name=$2 month stem sha target code remote job
   month=$(date -r "$local_path" +%Y-%m)
@@ -81,6 +103,7 @@ ship() { # <local_path> <name>
     echo "size mismatch: $name local $(stat -c %s "$local_path") remote $remote" >&2; return 1
   fi
   echo "uploaded: $name -> $NC_DIR/$month/$stem/"
+  file_with_meet "$month/$stem" "$stem" "$(stat -c %s "$local_path")" "$(date -u -r "$local_path" +%Y-%m-%dT%H:%M:%SZ)"
   # Hand the recording to transcribe before it goes; egress-transcribe
   # collects the transcript when the job is done.
   if [ -n "${TX_TOKEN:-}" ]; then

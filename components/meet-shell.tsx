@@ -33,7 +33,14 @@ export async function MeetShell({
       ]}
       footer={footer}
       corners={topRight ? { topRight } : undefined}
-      nav={session ? [{ label: "儀表板", href: "/dashboard", tip: "" }] : []}
+      nav={
+        session
+          ? [
+              { label: "會議紀錄", href: "/recordings", tip: "" },
+              { label: "儀表板", href: "/dashboard", tip: "" },
+            ]
+          : []
+      }
       account={
         session ? undefined : { label: "登入", href: "/sign-in", tip: "" }
       }
