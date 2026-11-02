@@ -135,7 +135,7 @@ export function GroupBars({
   const data = groups.map((g) => ({
     label: g.label,
     hours: Math.round((g.minutes / 60) * 10) / 10,
-    note: `${g.meetings} 場、${Math.round((g.minutes / 60) * 10) / 10} 小時`,
+    note: `${g.meetings} 場、${g.minutes < 60 ? `${g.minutes} 分鐘` : `${Math.round((g.minutes / 60) * 10) / 10} 小時`}`,
   }))
   return (
     <ChartContainer
@@ -151,7 +151,13 @@ export function GroupBars({
           axisLine={false}
           width={120}
         />
-        <Bar dataKey="hours" fill="var(--color-hours)" radius={4} barSize={12}>
+        <Bar
+          dataKey="hours"
+          fill="var(--color-hours)"
+          radius={4}
+          barSize={12}
+          minPointSize={4}
+        >
           <LabelList
             dataKey="note"
             position="right"

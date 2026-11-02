@@ -183,13 +183,15 @@ export const dashboard = defineAction({
     let recordingCount = 0
     for (const rec of filed) {
       if (rec.startedAt.getTime() < month) continue
-      const name = rec.group || rec.opener || "未知"
+      bytes += rec.bytes
+      recordingCount += 1
+      // Rooms opened outside meet (lk tests) have no opener; skip them here.
+      const name = rec.group || rec.opener
+      if (!name) continue
       const group = groups.get(name) ?? { rooms: new Set(), minutes: 0 }
       group.rooms.add(rec.booking || rec.room)
       group.minutes += (rec.endedAt.getTime() - rec.startedAt.getTime()) / 60000
       groups.set(name, group)
-      bytes += rec.bytes
-      recordingCount += 1
     }
     const failed = rows.filter(
       (row) =>
