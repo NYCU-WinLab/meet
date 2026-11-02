@@ -110,9 +110,13 @@ export async function summarize(
   )
   const text = textOf(data)
   console.log(new Date().toISOString(), "summary usage", data.usage)
-  const parsed = JSON.parse(
-    text.replace(/^```(?:json)?\s*/, "").replace(/\s*```$/, "")
-  ) as Partial<Summary>
+  // Without thinking the model sometimes writes a heading such as
+  // "任務一：改寫摘要" or a code fence around the JSON: read the outermost object.
+  const start = text.indexOf("{")
+  const end = text.lastIndexOf("}")
+  if (start < 0 || end < start)
+    throw new Error(`summary is not JSON: ${text.slice(0, 40)}`)
+  const parsed = JSON.parse(text.slice(start, end + 1)) as Partial<Summary>
   const list = (value: unknown) =>
     Array.isArray(value) ? value.map(String).filter(Boolean) : []
   return {
