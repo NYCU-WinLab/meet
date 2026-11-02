@@ -11,6 +11,9 @@ type GroupMembers = ProjectGroup & { members: string[] }
 
 let cache: { at: number; groups: GroupMembers[] } | null = null
 const ttl = 5 * 60 * 1000
+/** After portal fails, answer from the failure for a minute instead of
+ * waiting 5 seconds on every request (a video's Range requests above all). */
+let failedAt = 0
 
 export async function projectGroups(): Promise<ProjectGroup[]> {
   return (await groupsWithMembers()).map(({ name, label }) => ({ name, label }))
@@ -25,6 +28,16 @@ async function groupsWithMembers(): Promise<GroupMembers[]> {
   if (cache && Date.now() - cache.at < ttl) return cache.groups
   const key = process.env.PORTAL_API_KEY
   if (!key) return []
+  if (Date.now() - failedAt < 60_000) throw new Error("portal 剛才沒有回應")
+  try {
+    return await fetchGroups(key)
+  } catch (error) {
+    failedAt = Date.now()
+    throw error
+  }
+}
+
+async function fetchGroups(key: string): Promise<GroupMembers[]> {
   const response = await fetch(
     "https://portal.winlab.tw/api/actions/list_project_groups",
     {

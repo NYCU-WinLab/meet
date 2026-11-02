@@ -241,11 +241,24 @@ async function scheduledByBooking(id: string) {
   return row
 }
 
+/** Portal, which books on members' behalf, or the member it was booked for:
+ * nobody else may move a booking to another group (whose members could
+ * then open its recording) or cancel it. */
+async function mayChange(actor: Actor, row: ScheduledRoom) {
+  if (actor.service) {
+    if (actor.service !== "portal") throw new Error("沒有權限改這個預約")
+    return
+  }
+  const me = await member(actor.userId)
+  if (!me.username || me.username !== row.opener)
+    throw new Error("只有預約的人能改這個預約")
+}
+
 export const updateScheduledRoom = defineAction({
   name: "update_scheduled_room",
   title: "改預約會議室",
   description:
-    "Changes a scheduled room's title, group, time or agenda by its booking id; a given agenda replaces the old one. The link stays the same.",
+    "Changes a scheduled room's title, group, time or agenda by its booking id; a given agenda replaces the old one. The link stays the same. Only the member it was booked for (or portal) may change it.",
   kind: "mutation",
   input: z.object({
     booking,
@@ -255,8 +268,9 @@ export const updateScheduledRoom = defineAction({
     endsAt: when.optional(),
     agenda: agendaList.optional(),
   }),
-  run: async (_actor, input) => {
+  run: async (actor, input) => {
     const row = await scheduledByBooking(input.booking)
+    await mayChange(actor, row)
     await checkGroup(input.group)
     const startsAt = input.startsAt ?? row.startsAt
     const endsAt = input.endsAt ?? row.endsAt
@@ -279,11 +293,12 @@ export const cancelScheduledRoom = defineAction({
   name: "cancel_scheduled_room",
   title: "取消預約會議室",
   description:
-    "Cancels a scheduled room by its booking id: the link stops working and an open room is closed.",
+    "Cancels a scheduled room by its booking id: the link stops working and an open room is closed. Only the member it was booked for (or portal) may cancel it.",
   kind: "mutation",
   input: z.object({ booking }),
-  run: async (_actor, input) => {
+  run: async (actor, input) => {
     const row = await scheduledByBooking(input.booking)
+    await mayChange(actor, row)
     await db
       .update(scheduledRoom)
       .set({ cancelledAt: new Date() })

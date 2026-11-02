@@ -231,7 +231,9 @@ async function myGroups(name: string) {
 }
 
 /** The stretches this member was in each room, as [from, to] in ms. A join
- * with no leave after it lasts until now. */
+ * ends at the member's leave, or at room_finished of the same room session.
+ * A join with neither (a lost webhook) counts only at its own moment, so a
+ * lost leave never stretches into a later recording of the room. */
 async function presence(userId: string, rooms: string[]) {
   const spans = new Map<string, [number, number][]>()
   if (rooms.length === 0) return spans
@@ -240,34 +242,53 @@ async function presence(userId: string, rooms: string[]) {
       event: livekitEvent.event,
       at: livekitEvent.at,
       room: livekitEvent.room,
+      roomSid: livekitEvent.roomSid,
+      participant: livekitEvent.participant,
       seconds: livekitEvent.participantSeconds,
     })
     .from(livekitEvent)
     .where(
       and(
-        eq(livekitEvent.participant, userId),
         inArray(livekitEvent.room, rooms),
-        inArray(livekitEvent.event, ["participant_joined", "participant_left"])
+        or(
+          and(
+            eq(livekitEvent.participant, userId),
+            inArray(livekitEvent.event, [
+              "participant_joined",
+              "participant_left",
+            ])
+          ),
+          eq(livekitEvent.event, "room_finished")
+        )
       )
     )
     .orderBy(asc(livekitEvent.at))
-  const open = new Map<string, number>()
+  const open = new Map<string, { from: number; sid: string | null }>()
+  const add = (room: string, from: number, to: number) =>
+    spans.set(room, [...(spans.get(room) ?? []), [from, to]])
   for (const row of rows) {
     if (!row.room) continue
     const at = row.at.getTime()
-    const list = spans.get(row.room) ?? []
-    if (row.event === "participant_joined") {
-      if (!open.has(row.room)) open.set(row.room, at)
+    const held = open.get(row.room)
+    if (row.event === "room_finished") {
+      // Only the session this join was in; with no sid on either side, the
+      // room closing still ends it.
+      if (held && (!held.sid || !row.roomSid || held.sid === row.roomSid)) {
+        add(row.room, held.from, at)
+        open.delete(row.room)
+      }
+    } else if (row.event === "participant_joined") {
+      // A second join before any leave: the first one's end was lost.
+      if (held) add(row.room, held.from, held.from)
+      open.set(row.room, { from: at, sid: row.roomSid })
     } else {
       // A leave also says how long they stayed, so a lost join still counts.
-      const from = open.get(row.room) ?? at - (row.seconds ?? 0) * 1000
-      list.push([from, at])
+      const from = held?.from ?? at - (row.seconds ?? 0) * 1000
+      add(row.room, from, at)
       open.delete(row.room)
     }
-    spans.set(row.room, list)
   }
-  for (const [room, from] of open)
-    spans.set(room, [...(spans.get(room) ?? []), [from, Date.now()]])
+  for (const [room, held] of open) add(room, held.from, held.from)
   return spans
 }
 
@@ -315,7 +336,10 @@ export const listMyRecordings = defineAction({
       .where(
         and(
           eq(livekitEvent.participant, actor.userId),
-          eq(livekitEvent.event, "participant_joined")
+          inArray(livekitEvent.event, [
+            "participant_joined",
+            "participant_left",
+          ])
         )
       )
     const rooms = joined.flatMap((r) => (r.room ? [r.room] : []))
@@ -330,7 +354,6 @@ export const listMyRecordings = defineAction({
       .from(recording)
       .where(or(...conditions))
       .orderBy(desc(recording.startedAt))
-      .limit(limit * 2)
     const spans = await presence(actor.userId, rooms)
     const recordings = rows
       .filter(
