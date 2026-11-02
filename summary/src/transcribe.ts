@@ -1,6 +1,8 @@
 // One chunk of speech to text through the lab's transcribe service: a WAV in,
 // a job id back, the transcript once the job is done. Silence is dropped
 // before it leaves, so an open microphone with nobody talking costs nothing.
+import { Limiter, runWithBackoff } from "./limiter.js"
+
 const base = process.env.TRANSCRIBE_URL ?? "https://transcribe.winlab.tw"
 const token = process.env.TRANSCRIBE_TOKEN ?? ""
 // Whisper guesses Japanese for Mandarin lectures when left to detect.
@@ -9,6 +11,21 @@ const language = process.env.SUMMARY_LANGUAGE ?? "zh"
 const quiet = Number(process.env.SUMMARY_QUIET_RMS ?? 300)
 /** Less speech than this is not worth a job. */
 const minMs = 2000
+
+// Every microphone shares this: at most 2 jobs in flight, the rest wait.
+const limiter = new Limiter({
+  concurrency: Number(process.env.SUMMARY_TRANSCRIBE_CONCURRENCY ?? 2),
+  maxQueued: Number(process.env.SUMMARY_TRANSCRIBE_MAX_QUEUE ?? 20),
+  onDrop: (queued) =>
+    stamp(
+      "transcribe queue full, dropped the oldest chunk;",
+      queued,
+      "waiting"
+    ),
+})
+const stamp = (...parts: unknown[]) =>
+  console.log(new Date().toISOString(), ...parts)
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
 export async function transcribeChunk(
   pcm: Buffer,
@@ -25,12 +42,28 @@ export async function transcribeChunk(
   )
   form.set("language", language)
   form.set("diarize", "false")
-  const created = await fetch(`${base}/api/jobs`, {
-    method: "POST",
-    headers: { authorization: `Bearer ${token}` },
-    body: form,
-  })
-  if (!created.ok) throw new Error(`transcribe ${created.status}`)
+  // The slot is held from the POST until the transcript is read, since the
+  // service counts a job as in progress until then.
+  return runWithBackoff(
+    limiter,
+    async () => {
+      const created = await fetch(`${base}/api/jobs`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}` },
+        body: form,
+      })
+      if (created.status === 429) {
+        await created.body?.cancel()
+        return { done: false, retryAfter: created.headers.get("retry-after") }
+      }
+      if (!created.ok) throw new Error(`transcribe ${created.status}`)
+      return { done: true, value: await finish(created) }
+    },
+    { sleep, log: stamp }
+  )
+}
+
+async function finish(created: Response): Promise<string> {
   const { job_id: job } = (await created.json()) as { job_id: string }
   const deadline = Date.now() + 90_000
   while (Date.now() < deadline) {
