@@ -71,6 +71,8 @@ webhook:
 | `MEET_BIND`, `MEET_PORT` | Where web listens on the host | `127.0.0.1`, `3000` |
 | `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_HEADERS` | Where traces and logs go; off when empty | |
 
+meet.winlab.tw deploys on every push to `main`. The release workflow pushes the image, then sends a Carrel app release (`winfra/meet`). On the machine, carrel-deployd runs [deploy/carrel-start.sh](deploy/carrel-start.sh): it sets `MEET_VERSION` in `/opt/meet/.env` and waits until web is healthy. A failed health check rolls back to the previous release. The app unit has a drop-in with `Type=notify`, `NotifyAccess=all` and `TimeoutStartSec=300`, so the check waits for the new container.
+
 ## MCP
 
 1. Add the server to a client, for example `claude mcp add --transport http meet <BETTER_AUTH_URL>/mcp`.
