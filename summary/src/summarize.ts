@@ -212,6 +212,9 @@ async function call(
     body: JSON.stringify({
       model,
       max_tokens: 2048,
+      // The rewrite follows fixed rules; thinking only filled max_tokens and
+      // left the JSON empty.
+      thinking: { type: "disabled" },
       tools,
       tool_choice: toolChoice,
       system: [

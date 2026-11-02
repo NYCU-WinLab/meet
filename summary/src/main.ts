@@ -37,6 +37,8 @@ const pollMs = Number(process.env.POLL_MS ?? 5000)
 const chunkMs = Number(process.env.SUMMARY_CHUNK_MS ?? 30000)
 /** How often the summary is rewritten when there is something new. */
 const summaryMs = Number(process.env.SUMMARY_EVERY_MS ?? 45000)
+/** The most lines one rewrite reads; a backlog is folded in batch by batch. */
+const batchLines = Number(process.env.SUMMARY_BATCH_LINES ?? 40)
 
 export const SAMPLE_RATE = 16000
 export const TOPIC = "meet.summary"
@@ -272,21 +274,28 @@ async function listen(
   log(meeting.name, who, "stopped", publication.sid)
 }
 
-// Rewrites the summary with the lines it has not seen, then publishes it.
+// Rewrites the summary with the oldest lines it has not seen, at most one
+// batch, then publishes it. A backlog (after a failure) is folded in batch by
+// batch right away, so every line reaches the summary and no call grows.
 async function refresh(meeting: Meeting) {
   if (meeting.summarizing || meeting.seen === meeting.lines.length) return
-  const fresh = meeting.lines.slice(meeting.seen).sort((a, b) => a.at - b.at)
+  const fresh = meeting.lines
+    .slice(meeting.seen, meeting.seen + batchLines)
+    .sort((a, b) => a.at - b.at)
   meeting.summarizing = true
+  let more = false
   try {
     const next = await summarize(meeting.summary, fresh)
-    meeting.seen = meeting.lines.length
+    meeting.seen += fresh.length
     meeting.summary = next
+    more = meeting.seen < meeting.lines.length && joined.has(meeting.name)
     await publish(meeting)
   } catch (error) {
     log(meeting.name, "summarize failed", error)
   } finally {
     meeting.summarizing = false
   }
+  if (more) void refresh(meeting)
 }
 
 // Nothing to show yet: no words heard and no agenda.
