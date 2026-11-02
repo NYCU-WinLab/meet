@@ -1,17 +1,43 @@
 // What meet reads from portal with its API key: the lab's project groups
-// (the slug files a recording under the right project) and a booking's
-// agenda when its room opens.
+// (the slug files a recording under the right project, and its members
+// may open that project's recordings) and a booking's agenda when its room opens.
 import { agendaList, type AgendaIn } from "@/lib/agenda"
 
 export type ProjectGroup = { name: string; label: string }
 
-let cache: { at: number; groups: ProjectGroup[] } | null = null
+/** A group with its members' usernames, to decide who may open its
+ * recordings. */
+type GroupMembers = ProjectGroup & { members: string[] }
+
+let cache: { at: number; groups: GroupMembers[] } | null = null
 const ttl = 5 * 60 * 1000
+/** After portal fails, answer from the failure for a minute instead of
+ * waiting 5 seconds on every request (a video's Range requests above all). */
+let failedAt = 0
 
 export async function projectGroups(): Promise<ProjectGroup[]> {
+  return (await groupsWithMembers()).map(({ name, label }) => ({ name, label }))
+}
+
+/** The usernames in each project group, by slug. */
+export async function groupMembers(): Promise<Map<string, string[]>> {
+  return new Map((await groupsWithMembers()).map((g) => [g.name, g.members]))
+}
+
+async function groupsWithMembers(): Promise<GroupMembers[]> {
   if (cache && Date.now() - cache.at < ttl) return cache.groups
   const key = process.env.PORTAL_API_KEY
   if (!key) return []
+  if (Date.now() - failedAt < 60_000) throw new Error("portal 剛才沒有回應")
+  try {
+    return await fetchGroups(key)
+  } catch (error) {
+    failedAt = Date.now()
+    throw error
+  }
+}
+
+async function fetchGroups(key: string): Promise<GroupMembers[]> {
   const response = await fetch(
     "https://portal.winlab.tw/api/actions/list_project_groups",
     {
@@ -25,9 +51,15 @@ export async function projectGroups(): Promise<ProjectGroup[]> {
     }
   )
   if (!response.ok) throw new Error(`portal ${response.status}`)
-  const data = (await response.json()) as { groups: ProjectGroup[] }
+  const data = (await response.json()) as {
+    groups: (ProjectGroup & { members?: { username?: string | null }[] })[]
+  }
   const groups = data.groups
-    .map(({ name, label }) => ({ name, label }))
+    .map(({ name, label, members }) => ({
+      name,
+      label,
+      members: (members ?? []).flatMap((m) => (m.username ? [m.username] : [])),
+    }))
     .sort((a, b) => a.label.localeCompare(b.label, "zh-TW"))
   cache = { at: Date.now(), groups }
   return groups

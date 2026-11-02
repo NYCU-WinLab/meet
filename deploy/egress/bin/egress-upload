@@ -63,6 +63,44 @@ urlencode() { python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys
 # transcript, subtitles and notes sit beside it and one folder share hands
 # all of them to the helper. Needs the fields in scope. Returns 1 when the
 # file must stay for a retry.
+# Tells meet where the recording is, so the members it belongs to find it
+# on meet.winlab.tw/recordings. Needs the fields in scope. A failure never
+# stops the upload (the file is already in Nextcloud): the request is kept
+# in $FILING and sent again on every run until meet takes it.
+FILING=/var/lib/egress-filing
+file_with_meet() { # <folder> <stem> <bytes> <mtime>
+  [ -n "${MEET_URL:-}" ] && [ -n "${MEET_SERVICE_KEY:-}" ] || return 0
+  local body spool
+  body=$(python3 - "$1" "$2" "$3" "$4" "$room" "$egress" "$start" "$end" "$group" "$person" "$booking" "$subject" <<'PY'
+import json, sys
+folder, stem, size, mtime, room, egress, start, end, group, person, booking, subject = sys.argv[1:]
+start = start or mtime
+print(json.dumps(dict(
+    id=egress or f"{room or stem}@{start}", room=room or stem, title=subject,
+    group=group, opener=person, booking=booking, folder=folder, stem=stem,
+    startedAt=start, endedAt=end or mtime, bytes=int(size or 0))))
+PY
+) || { echo "meet file_recording: could not build the request for $2" >&2; return 0; }
+  mkdir -p "$FILING"
+  spool="$FILING/$(printf '%s' "$1" | sha256sum | cut -c1-32).json"
+  printf '%s\n' "$body" > "$spool"
+  send_filing "$spool"
+}
+
+# Sends one kept file_recording request; removes it once meet answers 200.
+# A 400 (meet refused the input) is kept as .rejected for a person to read.
+send_filing() { # <spool file>
+  local code
+  code=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 15 \
+    -H "Authorization: Bearer $MEET_SERVICE_KEY" -H "content-type: application/json" \
+    --data-binary "@$1" "${MEET_URL%/}/api/actions/file_recording")
+  case "$code" in
+    200) rm -f "$1" ;;
+    400) mv "$1" "${1%.json}.rejected"; echo "meet refused file_recording: $1" >&2 ;;
+    *) echo "meet file_recording failed ($code), kept for the next run: $1" >&2 ;;
+  esac
+}
+
 ship() { # <local_path> <name>
   local local_path=$1 name=$2 month stem sha target code remote job
   month=$(date -r "$local_path" +%Y-%m)
@@ -81,6 +119,7 @@ ship() { # <local_path> <name>
     echo "size mismatch: $name local $(stat -c %s "$local_path") remote $remote" >&2; return 1
   fi
   echo "uploaded: $name -> $NC_DIR/$month/$stem/"
+  file_with_meet "$month/$stem" "$stem" "$(stat -c %s "$local_path")" "$(date -u -r "$local_path" +%Y-%m-%dT%H:%M:%SZ)"
   # Hand the recording to transcribe before it goes; egress-transcribe
   # collects the transcript when the job is done.
   if [ -n "${TX_TOKEN:-}" ]; then
@@ -189,6 +228,10 @@ for a, b in keep:
 
 # New recordings: cut the empty stretches, then ship at once, or hold the
 # parts of a booking.
+if [ -n "${MEET_URL:-}" ] && [ -n "${MEET_SERVICE_KEY:-}" ]; then
+  for spool in "$FILING"/*.json; do send_filing "$spool"; done
+fi
+
 for manifest in "$OUT"/EG_*.json; do
   remaining=0
   while IFS= read -r name; do
