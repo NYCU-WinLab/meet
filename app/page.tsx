@@ -5,7 +5,6 @@ import { listGroups, listRooms } from "@/lib/actions/rooms"
 import { whoami } from "@/lib/actions/users"
 import { requireActor } from "@/lib/auth/session"
 
-import { CreateRoom } from "./create-room"
 import { RoomList } from "./room-list"
 
 export const dynamic = "force-dynamic"
@@ -20,17 +19,14 @@ export default async function Home() {
   return (
     <MeetShell>
       <div className="flex flex-col gap-12">
-        <PageHeader
-          title="會議室"
-          actions={
-            <CreateRoom
-              groups={groups}
-              self={me.username ?? me.name}
-              full={rooms.length >= maxRooms}
-            />
-          }
+        <PageHeader title="會議室" />
+        <RoomList
+          rooms={rooms}
+          maxRooms={maxRooms}
+          scheduled={scheduled}
+          groups={groups}
+          self={me.username ?? me.name}
         />
-        <RoomList rooms={rooms} scheduled={scheduled} />
       </div>
     </MeetShell>
   )
