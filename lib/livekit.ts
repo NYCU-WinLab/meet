@@ -125,6 +125,8 @@ const safeId = (id: string) => (idPattern.test(id) ? id : "")
 const safeTitle = (title: string) =>
   title
     .replace(/[\\/:*?"<>|~\x00-\x1f\x7f]+/g, " ")
+    // winlab-helper refuses ".." anywhere in a recording's file name.
+    .replace(/\.{2,}/g, ".")
     .replace(/\s+/g, " ")
     .trim()
 
