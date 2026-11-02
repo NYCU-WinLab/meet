@@ -1,62 +1,75 @@
 import { MeetShell } from "@/components/meet-shell"
-import { PageHeader } from "@/components/page-header"
-import { SectionHeader } from "@/components/page-header"
+import { PageHeader, SectionHeader } from "@/components/page-header"
 import { dashboard } from "@/lib/actions/dashboard"
 import { runAction } from "@/lib/actions/define"
+import { listGroups } from "@/lib/actions/rooms"
 import { requireActor } from "@/lib/auth/session"
 
-import { Figures, WeeklyChart } from "./figures"
+import { GroupBars, Heatmap, TrendCard } from "./figures"
 
 export const dynamic = "force-dynamic"
 
+// Three questions: are the rooms enough, how are they used, and by whom.
+// The operator's figures sit in one line at the bottom.
 export default async function DashboardPage() {
   const actor = await requireActor("/dashboard")
-  const data = await runAction(dashboard, actor, {})
+  const [data, { groups }] = await Promise.all([
+    runAction(dashboard, actor, {}),
+    runAction(listGroups, actor, {}).catch(() => ({ groups: [] })),
+  ])
+  const labels = new Map(groups.map((g) => [g.name, g.label]))
+  const { now, thisWeek, recordings } = data
   return (
     <MeetShell page={{ label: "儀表板", href: "/dashboard", tip: "" }}>
       <div className="flex flex-col gap-12">
-        <PageHeader title="儀表板" />
-        <section className="flex flex-col gap-6">
-          <SectionHeader title="現在" />
-          <Figures
-            items={[
-              { label: "會議室", value: data.now.rooms },
-              { label: "人", value: data.now.members },
-              { label: "錄影中", value: data.now.recording },
-            ]}
+        <div className="flex flex-col gap-3">
+          <PageHeader title="儀表板" />
+          <p className="text-muted-foreground">
+            {`現在 ${now.maxRooms} 間開了 ${now.rooms} 間、${now.members} 人在會議裡、${now.recording} 支錄影中`}
+          </p>
+        </div>
+        <section className="grid gap-6 md:grid-cols-3">
+          <TrendCard
+            label="本週會議"
+            unit="場"
+            trend={data.meetings}
+            note={`平均 ${thisWeek.avgMinutes} 分鐘、${thisWeek.avgMembers} 人`}
+          />
+          <TrendCard
+            label="本週人小時"
+            unit="小時"
+            trend={data.memberHours}
+            note="每個人在會議裡的時間加總"
+          />
+          <TrendCard
+            label="本週滿格"
+            unit="小時"
+            trend={data.fullHours}
+            note={`${now.maxRooms} 間都在用的時間，尖峰同時 ${thisWeek.peakRooms} 間`}
           />
         </section>
         <section className="flex flex-col gap-6">
-          <SectionHeader title="本週" />
-          <Figures items={periodItems(data.thisWeek)} />
+          <SectionHeader title="哪個時段最擠（近 8 週）" />
+          <Heatmap heat={data.heat} />
         </section>
         <section className="flex flex-col gap-6">
-          <SectionHeader title="本月" />
-          <Figures items={periodItems(data.thisMonth)} />
+          <SectionHeader title="誰在用（本月）" />
+          <GroupBars
+            groups={data.groups.map((g) => ({
+              ...g,
+              label: labels.get(g.name) ?? g.name,
+            }))}
+          />
         </section>
-        <section className="flex flex-col gap-6">
-          <SectionHeader title="每週" />
-          <WeeklyChart weeks={data.weekly} />
-        </section>
+        <p className="text-muted-foreground">
+          {`本月錄影 ${recordings.count} 支、${Math.round(recordings.bytes / 1e8) / 10} GB、`}
+          <span
+            className={recordings.failed > 0 ? "text-destructive" : undefined}
+          >
+            {`失敗 ${recordings.failed} 支`}
+          </span>
+        </p>
       </div>
     </MeetShell>
   )
-}
-
-function periodItems(stats: {
-  meetings: number
-  memberMinutes: number
-  recordings: number
-  recordingMinutes: number
-  recordingBytes: number
-  failedRecordings: number
-}) {
-  return [
-    { label: "會議", value: stats.meetings },
-    { label: "人分鐘", value: stats.memberMinutes },
-    { label: "錄影", value: stats.recordings },
-    { label: "錄影分鐘", value: stats.recordingMinutes },
-    { label: "錄影 GB", value: Math.round(stats.recordingBytes / 1e8) / 10 },
-    { label: "錄影失敗", value: stats.failedRecordings },
-  ]
 }
