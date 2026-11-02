@@ -34,7 +34,7 @@ const apiSecret = need("LIVEKIT_API_SECRET")
 const identity = process.env.SUMMARY_IDENTITY ?? "summary"
 const pollMs = Number(process.env.POLL_MS ?? 5000)
 /** How much of each microphone goes to transcribe at a time. */
-const chunkMs = Number(process.env.SUMMARY_CHUNK_MS ?? 30000)
+const chunkMs = Number(process.env.SUMMARY_CHUNK_MS ?? 60000)
 /** How often the summary is rewritten when there is something new. */
 const summaryMs = Number(process.env.SUMMARY_EVERY_MS ?? 45000)
 /** The most lines one rewrite reads; a backlog is folded in batch by batch. */
