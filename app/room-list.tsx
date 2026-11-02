@@ -67,6 +67,8 @@ export function RoomList({
     (_, i) => open[i]
   )
   const next = scheduled[0]
+  // The next booking takes the first free slot, so only that slot names it.
+  const firstFree = slots.findIndex((room) => !room)
 
   return (
     <div className="flex flex-col gap-12">
@@ -74,7 +76,7 @@ export function RoomList({
         {slots.map((room, i) => (
           <li
             key={room?.name ?? `free-${i}`}
-            className="flex min-h-44 flex-col gap-6 rounded-control bg-muted p-6"
+            className="flex min-h-44 flex-col gap-6 rounded-surface bg-muted p-6"
           >
             <span className="text-muted-foreground">{`會議室 ${slotName(i)}`}</span>
             {room ? (
@@ -110,7 +112,7 @@ export function RoomList({
               <>
                 <div className="flex min-w-0 flex-1 flex-col">
                   <span className="font-medium">空的</span>
-                  {next && (
+                  {next && i === firstFree && (
                     <span className="truncate text-muted-foreground">
                       {`下一個預約：${day.format(next.startsAt)} ${next.title}`}
                     </span>
