@@ -52,9 +52,20 @@ export default async function DashboardPage() {
           <GroupBars
             groups={data.groups.map((g) => ({
               ...g,
-              label: labels.get(g.name) ?? g.name,
+              label: labels.get(g.name) ?? g.label ?? g.name,
             }))}
           />
+        </section>
+        <section className="flex flex-col gap-6">
+          <SectionHeader title="摘要 agent 花了多少" />
+          <div className="grid gap-6 md:grid-cols-3">
+            <TrendCard
+              label="本週花費"
+              unit="美元"
+              trend={data.ai.cost}
+              note={`本月 ${data.ai.month.costUsd} 美元，摘要 ${data.ai.month.summaries} 次、回答提問 ${data.ai.month.answers} 次`}
+            />
+          </div>
         </section>
         <p className="text-muted-foreground">
           {`本月錄影 ${recordings.count} 支、${Math.round(recordings.bytes / 1e8) / 10} GB、`}

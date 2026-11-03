@@ -9,6 +9,7 @@ import {
   scheduleRoom,
   updateScheduledRoom,
 } from "@/lib/actions/rooms"
+import { recordAiUsage } from "@/lib/actions/ai-usage"
 import { dashboard } from "@/lib/actions/dashboard"
 import {
   fileRecording,
@@ -32,6 +33,7 @@ export const actions: Action[] = [
   joinRoom,
   endRoom,
   dashboard,
+  recordAiUsage,
   recordingGaps,
   fileRecording,
   listMyRecordings,

@@ -38,6 +38,9 @@ export type Action<
   run: (actor: Actor, input: z.infer<Input>) => Promise<Output>
   /** Set only to keep it off MCP, with the reason. */
   mcpExcludedBecause?: string
+  /** A frequent write no page needs at once (usage logs): it does not make
+   * every open page refresh. */
+  quiet?: boolean
 }
 
 /** Names of every action created, for the registry check. */
@@ -64,7 +67,7 @@ export async function runAction<Input extends z.ZodObject, Output>(
       const result = await action.run(actor, action.input.parse(input))
       // Open pages refresh on this; a failed announcement never fails the
       // change itself.
-      if (action.kind === "mutation")
+      if (action.kind === "mutation" && !action.quiet)
         await announceChange(action.name).catch(() => {})
       return result
     }

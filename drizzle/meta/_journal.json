@@ -43,6 +43,13 @@
       "when": 1793580684180,
       "tag": "0005_recordings",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1793672344187,
+      "tag": "0006_bright_kree",
+      "breakpoints": true
     }
   ]
 }

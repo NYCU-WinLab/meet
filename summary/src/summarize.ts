@@ -4,6 +4,8 @@
 // are the same every call and sit in the prompt cache. The same model also
 // answers questions asked with @agent in the chat; both calls send the same
 // tools and instructions first, so they share that cached prefix.
+import { reportUsage, type Usage } from "./usage.js"
+
 const apiKey = process.env.ANTHROPIC_API_KEY ?? ""
 const model = process.env.SUMMARY_MODEL ?? "claude-haiku-5-5"
 /** How hard the model thinks: low, medium or high. */
@@ -98,7 +100,8 @@ JSON 欄位：
 
 export async function summarize(
   current: Summary,
-  fresh: { at: number; who: string; text: string }[]
+  fresh: { at: number; who: string; text: string }[],
+  room: string
 ): Promise<Summary> {
   const data = await call(
     [
@@ -113,6 +116,7 @@ export async function summarize(
   )
   const text = textOf(data)
   console.log(new Date().toISOString(), "summary usage", data.usage)
+  reportUsage(room, "summary", model, data.usage)
   // The model sometimes writes a heading such as
   // "任務一：改寫摘要" or a code fence around the JSON: read the outermost object.
   const start = text.indexOf("{")
@@ -168,7 +172,7 @@ type Block = {
 type Response = {
   content: Block[]
   stop_reason: string
-  usage: Record<string, unknown>
+  usage: Usage
 }
 
 /** The state as the model sees it: no timestamp, no links. */
@@ -256,7 +260,8 @@ export async function answer(
   current: Summary,
   lines: Line[],
   who: string,
-  question: string
+  question: string,
+  room: string
 ): Promise<string> {
   const recent = [...lines].sort((a, b) => a.at - b.at).slice(-QUESTION_LINES)
   const messages: { role: "user" | "assistant"; content: unknown }[] = [
@@ -266,10 +271,12 @@ export async function answer(
     },
   ]
   let data = await call(messages, { type: "auto" })
+  reportUsage(room, "answer", model, data.usage)
   // A long search can pause the turn; send it back to let it finish.
   for (let i = 0; i < 3 && data.stop_reason === "pause_turn"; i++) {
     messages.push({ role: "assistant", content: data.content })
     data = await call(messages, { type: "auto" })
+    reportUsage(room, "answer", model, data.usage)
   }
   console.log(new Date().toISOString(), "answer usage", data.usage)
   const text = textOf(data).trim()
