@@ -28,6 +28,9 @@ services:
   web:
     image: ghcr.io/nycu-winlab/meet:${MEET_VERSION:-main}
     restart: unless-stopped
+    init: true
+    # Next waits for open event streams on SIGTERM; cut them short.
+    stop_grace_period: 3s
     env_file: .env
     environment:
       DATABASE_URL: postgres://meet:${POSTGRES_PASSWORD}@postgres:5432/meet
@@ -44,6 +47,8 @@ services:
         - fetch('http://localhost:3000/.well-known/oauth-protected-resource').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))
       interval: 10s
       retries: 10
+      start_period: 60s
+      start_interval: 1s
 
   # Running summary: joins every room as a hidden participant, sends each
   # microphone to the lab's transcribe service in 60 s chunks (at most 2 jobs in

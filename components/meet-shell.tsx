@@ -1,6 +1,7 @@
 import { AppShell } from "@/components/app-shell"
 import { LiveRefresh } from "@/components/live-refresh"
 import { getSession } from "@/lib/auth/session"
+import { runningBuild } from "@/lib/build"
 
 // Meet's corners: the lab and the page in the breadcrumb, the dashboard in
 // the top right (登入 when signed out), the build in the bottom left.
@@ -32,6 +33,7 @@ export async function MeetShell({
         ...(page ? [page] : []),
       ]}
       footer={footer}
+      build={runningBuild()}
       corners={topRight ? { topRight } : undefined}
       nav={
         session

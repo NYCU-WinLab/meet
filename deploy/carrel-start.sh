@@ -6,6 +6,12 @@
 set -eu
 
 version=$(cat VERSION)
+# The release carries the stack's compose.yaml, so the repo is its source.
+# An older release (a rollback) has none and keeps the one in place.
+if [ -f compose.yaml ]; then
+  cp compose.yaml /opt/meet/compose.yaml.new
+  mv /opt/meet/compose.yaml.new /opt/meet/compose.yaml
+fi
 cd /opt/meet
 
 tmp=$(mktemp .env.XXXXXX)
