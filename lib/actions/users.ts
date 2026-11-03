@@ -4,6 +4,7 @@ import { z } from "zod"
 import { defineAction } from "@/lib/actions/define"
 import { db } from "@/lib/db"
 import { user } from "@/lib/db/schema"
+import { memberAvatar as memberAvatarFromPortal } from "@/lib/portal"
 
 export const whoami = defineAction({
   name: "whoami",
@@ -25,4 +26,22 @@ export const whoami = defineAction({
     if (!member) throw new Error("找不到這個成員")
     return member
   },
+})
+
+export const memberAvatar = defineAction({
+  name: "member_avatar",
+  title: "成員頭像",
+  description:
+    "One member's avatar from portal as base64 WebP with its version, or null when they have none. user_id is a meet member id, the same as their LiveKit identity.",
+  kind: "query",
+  input: z.object({ user_id: z.string().min(1).max(64) }),
+  run: async (_actor, input) => {
+    const [member] = await db
+      .select({ username: user.username })
+      .from(user)
+      .where(eq(user.id, input.user_id))
+    return member?.username ? memberAvatarFromPortal(member.username) : null
+  },
+  mcpExcludedBecause:
+    "It returns image bytes for the chat's pictures; an agent has no use for them.",
 })

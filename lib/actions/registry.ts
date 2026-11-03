@@ -17,11 +17,12 @@ import {
   recordingFile,
   recordingGaps,
 } from "@/lib/actions/recordings"
-import { whoami } from "@/lib/actions/users"
+import { memberAvatar, whoami } from "@/lib/actions/users"
 
 /** Every action, in the order MCP lists them. */
 export const actions: Action[] = [
   whoami,
+  memberAvatar,
   listRooms,
   listGroups,
   createRoomAction,

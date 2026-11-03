@@ -3,7 +3,6 @@
 import {
   LiveKitRoom,
   RoomAudioRenderer,
-  useChat,
   useConnectionQualityIndicator,
   useConnectionState,
   useIsMuted,
@@ -30,7 +29,6 @@ import {
   MonitorXIcon,
   PinIcon,
   PinOffIcon,
-  SendIcon,
   SignalLowIcon,
   VideoIcon,
   VideoOffIcon,
@@ -40,8 +38,8 @@ import * as React from "react"
 import { createPortal } from "react-dom"
 import { toast } from "sonner"
 
+import { Chat } from "@/components/chat"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import {
   Tooltip,
   TooltipContent,
@@ -651,7 +649,16 @@ function SummaryListener({
 }
 
 // The summary above, the chat below, in one panel that slides in from the
-// right. It stays mounted while closed so the chat keeps its messages.
+// right. It stays mounted while closed so the chat keeps its messages. Its
+// left edge drags to resize it (arrow keys too, double-click resets), and
+// the width is kept in this browser.
+const PANEL_DEFAULT = 400
+const PANEL_MIN = 320
+const PANEL_MAX = 800
+const PANEL_KEY = "meet.panel-width"
+/** The gutter between the stage and the panel. */
+const GUTTER = 24
+
 function MeetingPanel({
   open,
   summary,
@@ -659,18 +666,103 @@ function MeetingPanel({
   open: boolean
   summary: Summary | null
 }) {
+  const frame = React.useRef<HTMLDivElement>(null)
+  const handle = React.useRef<HTMLDivElement>(null)
+  // A ref, not state: dragging repaints through CSS variables only.
+  const width = React.useRef(PANEL_DEFAULT)
+  const [dragging, setDragging] = React.useState(false)
+
+  // Widths live in CSS variables set from here, so the transition still
+  // runs on open and close, and stops while dragging.
+  const apply = React.useCallback((wanted: number) => {
+    const most = Math.max(
+      PANEL_MIN,
+      Math.min(PANEL_MAX, window.innerWidth * 0.6)
+    )
+    const next = Math.round(Math.min(most, Math.max(PANEL_MIN, wanted)))
+    frame.current?.style.setProperty("--panel", `${next}px`)
+    frame.current?.style.setProperty("--panel-outer", `${next + GUTTER}px`)
+    handle.current?.setAttribute("aria-valuenow", String(next))
+    width.current = next
+    return next
+  }, [])
+
+  React.useEffect(() => {
+    let saved = PANEL_DEFAULT
+    try {
+      saved = Number(localStorage.getItem(PANEL_KEY)) || PANEL_DEFAULT
+    } catch {}
+    apply(saved)
+  }, [apply])
+
+  const save = (value: number) => {
+    try {
+      localStorage.setItem(PANEL_KEY, String(value))
+    } catch {}
+  }
+
+  function startDrag(event: React.PointerEvent<HTMLDivElement>) {
+    event.preventDefault()
+    event.currentTarget.setPointerCapture(event.pointerId)
+    setDragging(true)
+  }
+  function drag(event: React.PointerEvent<HTMLDivElement>) {
+    if (!dragging) return
+    const right =
+      frame.current?.getBoundingClientRect().right ?? window.innerWidth
+    apply(right - event.clientX - GUTTER / 2)
+  }
+  function endDrag() {
+    if (!dragging) return
+    setDragging(false)
+    save(width.current)
+  }
+
   return (
     <div
+      ref={frame}
       inert={!open}
       className={cn(
-        "min-h-0 overflow-hidden md:block md:transition-all md:duration-overlay md:motion-reduce:transition-none",
-        open ? "flex flex-1 flex-col md:w-86 md:flex-none" : "hidden md:w-0"
+        "relative min-h-0 overflow-hidden md:block md:transition-all md:duration-overlay md:motion-reduce:transition-none",
+        dragging && "md:transition-none",
+        open
+          ? "flex flex-1 flex-col md:w-(--panel-outer) md:flex-none"
+          : "hidden md:w-0"
       )}
     >
+      <div
+        ref={handle}
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="調整摘要與聊天的寬度"
+        aria-valuemin={PANEL_MIN}
+        aria-valuemax={PANEL_MAX}
+        tabIndex={open ? 0 : -1}
+        onPointerDown={startDrag}
+        onPointerMove={drag}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+        onDoubleClick={() => save(apply(PANEL_DEFAULT))}
+        onKeyDown={(event) => {
+          if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return
+          event.preventDefault()
+          save(apply(width.current + (event.key === "ArrowLeft" ? 32 : -32)))
+        }}
+        className="group absolute inset-y-0 left-0 hidden w-6 cursor-col-resize touch-none items-center justify-center outline-none md:flex"
+      >
+        <span
+          aria-hidden
+          className={cn(
+            "h-12 w-1 rounded-full bg-border transition-colors duration-state group-hover:bg-muted-foreground group-focus-visible:bg-primary",
+            dragging && "bg-primary"
+          )}
+        />
+      </div>
       <aside
         aria-label="摘要與聊天"
         className={cn(
-          "flex h-full min-h-0 flex-1 flex-col rounded-control bg-muted md:ml-6 md:w-80 md:transition-all md:duration-overlay",
+          "flex h-full min-h-0 flex-1 flex-col rounded-control bg-muted md:ml-6 md:w-(--panel) md:transition-all md:duration-overlay",
+          dragging && "md:transition-none",
           open
             ? "opacity-100"
             : "opacity-0 md:translate-x-8 md:motion-reduce:translate-x-0"
@@ -685,7 +777,7 @@ function MeetingPanel({
 
 function SummaryPanel({ summary }: { summary: Summary | null }) {
   return (
-    <section className="flex min-h-0 flex-1 basis-0 flex-col gap-4 overflow-y-auto p-4">
+    <section className="flex min-h-0 flex-1 basis-0 flex-col gap-6 overflow-y-auto p-4 leading-7">
       <h2 className="text-muted-foreground">摘要</h2>
       {summary?.agenda && summary.agenda.length > 0 && (
         <AgendaList items={summary.agenda} />
@@ -727,10 +819,10 @@ function AgendaList({ items }: { items: AgendaItem[] }) {
   return (
     <section className="flex flex-col gap-2">
       <h2 className="text-muted-foreground">議程</h2>
-      <ul className="flex flex-col gap-2">
+      <ul className="flex flex-col gap-3">
         {sorted.map((item) => (
           <li key={item.id} className="flex gap-2">
-            <span className="mt-0.5 shrink-0 [&_svg]:size-4">
+            <span className="mt-1.5 shrink-0 [&_svg]:size-4">
               {statusIcon[item.status]}
             </span>
             <div className="flex min-w-0 flex-col">
@@ -764,81 +856,13 @@ function SummaryList({ title, items }: { title: string; items: string[] }) {
   return (
     <section className="flex flex-col gap-2">
       <h2 className="text-muted-foreground">{title}</h2>
-      <ul className="flex list-disc flex-col gap-1 pl-5">
+      <ul className="flex list-disc flex-col gap-2 pl-5 marker:text-muted-foreground">
         {items.map((item) => (
           <li key={item} className="break-words">
             {item}
           </li>
         ))}
       </ul>
-    </section>
-  )
-}
-
-function Chat() {
-  const { chatMessages, send, isSending } = useChat()
-  const { localParticipant } = useLocalParticipant()
-  const bottom = React.useRef<HTMLLIElement>(null)
-  const [draft, setDraft] = React.useState("")
-
-  React.useEffect(() => {
-    bottom.current?.scrollIntoView({ block: "end" })
-  }, [chatMessages.length])
-
-  async function submit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    const text = draft.trim()
-    if (!text) return
-    setDraft("")
-    await send(text)
-  }
-
-  return (
-    <section className="flex min-h-0 flex-1 basis-0 flex-col gap-4 border-t p-4">
-      <h2 className="text-muted-foreground">聊天</h2>
-      <ol className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
-        {chatMessages.length === 0 && (
-          <li className="text-muted-foreground">還沒有人說話</li>
-        )}
-        {chatMessages.map((message) => {
-          const mine = message.from?.identity === localParticipant.identity
-          // The agent is hidden, so its replies carry a mark instead of a name.
-          const agent = message.attributes?.["meet.agent"] === "1"
-          return (
-            <li key={message.id ?? message.timestamp} className="flex flex-col">
-              <span className="text-muted-foreground">
-                {mine
-                  ? "我"
-                  : agent
-                    ? "agent"
-                    : (message.from?.name ?? message.from?.identity)}
-              </span>
-              <span className="break-words whitespace-pre-wrap">
-                {message.message}
-              </span>
-            </li>
-          )
-        })}
-        <li ref={bottom} aria-hidden />
-      </ol>
-      <form onSubmit={submit} className="flex gap-2">
-        <Input
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          placeholder="說點什麼，@agent 可以發問"
-          aria-label="訊息"
-          maxLength={2000}
-        />
-        <Button
-          type="submit"
-          size="icon"
-          variant="outline"
-          aria-label="送出"
-          disabled={isSending || !draft.trim()}
-        >
-          <SendIcon />
-        </Button>
-      </form>
     </section>
   )
 }

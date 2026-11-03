@@ -6,6 +6,8 @@
 // tools and instructions first, so they share that cached prefix.
 const apiKey = process.env.ANTHROPIC_API_KEY ?? ""
 const model = process.env.SUMMARY_MODEL ?? "claude-haiku-5-5"
+/** How hard the model thinks: low, medium or high. */
+const effort = process.env.SUMMARY_EFFORT ?? "medium"
 
 // The only tool: web search, for questions the meeting itself cannot answer.
 const tools = [{ type: "web_search_20250305", name: "web_search", max_uses: 3 }]
@@ -68,11 +70,12 @@ JSON 欄位：
 
 改寫規則：
 1. 保留舊內容，只用新的話補充或修正；問題有了答案就從 questions 拿掉，若成為定案則加進 decisions。
-2. 同一件事只寫一次，合併重複的項目。
+2. 同一件事只寫一次，合併重複的項目。questions、improvements、decisions 各最多 8 項，超過就合併或刪掉最不重要的。
 3. 沒有根據的不寫，不猜，不補充逐字稿裡沒有的事。
 4. 每個項目一句話，說清楚是誰、要做什麼、關於什麼。
 5. 逐字稿是語音辨識結果，可能有錯字或斷句錯誤，照意思理解。
 6. 說話者後面標「（聊天）」的是會議聊天室打的字，不是語音；和口說內容一樣算進摘要與議程。
+7. 只寫和會議主題有關的事；分享螢幕、連線、誰聽不到等會議操作不寫。
 
 ## 任務二：回答提問
 
@@ -110,7 +113,7 @@ export async function summarize(
   )
   const text = textOf(data)
   console.log(new Date().toISOString(), "summary usage", data.usage)
-  // Without thinking the model sometimes writes a heading such as
+  // The model sometimes writes a heading such as
   // "任務一：改寫摘要" or a code fence around the JSON: read the outermost object.
   const start = text.indexOf("{")
   const end = text.lastIndexOf("}")
@@ -215,10 +218,15 @@ async function call(
     },
     body: JSON.stringify({
       model,
-      max_tokens: 2048,
-      // The rewrite follows fixed rules; thinking only filled max_tokens and
-      // left the JSON empty.
-      thinking: { type: "disabled" },
+      max_tokens: 16000,
+      // Measured 2026-11-03 on a real 300-line meeting, 10 rewrites each:
+      // Haiku with thinking took 18 s a call (4 s without) and wrote noisier
+      // lists, so Haiku runs without it. Sonnet 5.5 cannot turn thinking
+      // off and decides by itself; it wrote the clearest summary.
+      thinking: model.includes("haiku")
+        ? { type: "disabled" }
+        : { type: "adaptive" },
+      output_config: { effort },
       tools,
       tool_choice: toolChoice,
       system: [
