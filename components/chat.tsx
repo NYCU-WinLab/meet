@@ -268,6 +268,7 @@ function Composer({
   onSend: (text: string) => Promise<unknown>
 }) {
   const input = React.useRef<HTMLInputElement>(null)
+  const caret = React.useRef<number | null>(null)
   const [draft, setDraft] = React.useState("")
   const [query, setQuery] = React.useState<{
     start: number
@@ -297,16 +298,23 @@ function Composer({
 
   function pick(person: Person) {
     if (!query) return
-    const caret = query.start + 1 + query.text.length
-    const next = `${draft.slice(0, query.start)}@${person.name} ${draft.slice(caret)}`
+    const end = query.start + 1 + query.text.length
+    const next = `${draft.slice(0, query.start)}@${person.name} ${draft.slice(end)}`
     const position = query.start + person.name.length + 2
+    caret.current = position
     setDraft(next)
     setQuery(null)
-    requestAnimationFrame(() => {
-      input.current?.focus()
-      input.current?.setSelectionRange(position, position)
-    })
   }
+
+  // The caret goes after the picked name as soon as the new text renders,
+  // before the next key arrives; a later frame would pull back what was
+  // typed in between.
+  React.useLayoutEffect(() => {
+    if (caret.current === null) return
+    input.current?.focus()
+    input.current?.setSelectionRange(caret.current, caret.current)
+    caret.current = null
+  }, [draft])
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
