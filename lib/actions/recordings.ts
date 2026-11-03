@@ -410,7 +410,7 @@ export const getRecording = defineAction({
           })
         : null,
       gitlabConfigured()
-        ? recordUrl(recordKeys(rec), rec.startedAt).catch((error) => {
+        ? recordUrl(recordKeys(rec)).catch((error) => {
             emitErrorLog(error, { source: "gitlab record" })
             return null
           })
