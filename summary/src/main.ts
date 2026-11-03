@@ -285,7 +285,7 @@ async function refresh(meeting: Meeting) {
   meeting.summarizing = true
   let more = false
   try {
-    const next = await summarize(meeting.summary, fresh)
+    const next = await summarize(meeting.summary, fresh, meeting.name)
     meeting.seen += fresh.length
     meeting.summary = next
     more = meeting.seen < meeting.lines.length && joined.has(meeting.name)
@@ -318,7 +318,13 @@ async function ask(meeting: Meeting, who: string, said: string) {
   meeting.answering = true
   try {
     const question = said.replace(MENTION, "").trim().slice(0, 500)
-    const text = await answer(meeting.summary, meeting.lines, who, question)
+    const text = await answer(
+      meeting.summary,
+      meeting.lines,
+      who,
+      question,
+      meeting.name
+    )
     await reply(text)
     meeting.lines.push({ at: Date.now(), who: "agent（聊天）", text })
     log(meeting.name, "answered", question.length, "->", text.length, "chars")

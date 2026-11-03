@@ -4,7 +4,7 @@ import { z } from "zod"
 import { defineAction } from "@/lib/actions/define"
 import { MAX_ROOMS } from "@/lib/actions/rooms"
 import { db } from "@/lib/db"
-import { livekitEvent, recording } from "@/lib/db/schema"
+import { aiUsage, livekitEvent, recording, user } from "@/lib/db/schema"
 import { activeRecordings, listRooms } from "@/lib/livekit"
 
 const weeks = 8
@@ -32,9 +32,22 @@ export type Dashboard = {
   heat: number[][]
   /** This month's meetings by the group (or member) they are filed under,
    * busiest first. */
-  groups: { name: string; meetings: number; minutes: number }[]
+  groups: {
+    name: string
+    /** The member's name for a personal meeting; groups are labelled by
+     * the page from portal. */
+    label?: string
+    meetings: number
+    minutes: number
+  }[]
   /** This month's recordings, for the operator. */
   recordings: { count: number; bytes: number; failed: number }
+  /** What the summary agent cost in US dollars: by week, and this month
+   * with its summary rewrites and @agent answers. */
+  ai: {
+    cost: Trend
+    month: { costUsd: number; summaries: number; answers: number }
+  }
 }
 
 // Calendar arithmetic in Taipei (UTC+8, no DST): shift the instant by 8 hours
@@ -76,7 +89,7 @@ export const dashboard = defineAction({
   name: "dashboard",
   title: "儀表板",
   description:
-    "Usage figures. now: rooms open, slots (maxRooms), members in rooms, recordings running. meetings, memberHours and fullHours (hours every slot was taken): this week, last week and the last 8 weeks. thisWeek: average meeting length and head count, most rooms open at once. heat: member minutes over 8 weeks by weekday (Monday first) and hour, Taipei time. groups: this month's meetings and minutes by project group or member. recordings: this month's count, bytes and failures.",
+    "Usage figures. now: rooms open, slots (maxRooms), members in rooms, recordings running. meetings, memberHours and fullHours (hours every slot was taken): this week, last week and the last 8 weeks. thisWeek: average meeting length and head count, most rooms open at once. heat: member minutes over 8 weeks by weekday (Monday first) and hour, Taipei time. groups: this month's meetings and minutes by project group or member. recordings: this month's count, bytes and failures. ai: what the summary agent cost in US dollars (Claude list price) by week, and this month with its count of summary rewrites and @agent answers.",
   kind: "query",
   input: z.object({}),
   run: async (): Promise<Dashboard> => {
@@ -85,7 +98,7 @@ export const dashboard = defineAction({
     const firstWeek = thisWeek - (weeks - 1) * WEEK
     const month = monthStart(now)
     const since = new Date(Math.min(firstWeek, month))
-    const [rooms, recordingNow, rows, filed] = await Promise.all([
+    const [rooms, recordingNow, rows, filed, calls] = await Promise.all([
       listRooms(),
       activeRecordings(),
       db
@@ -103,6 +116,14 @@ export const dashboard = defineAction({
           )
         ),
       db.select().from(recording).where(gte(recording.startedAt, since)),
+      db
+        .select({
+          at: aiUsage.at,
+          kind: aiUsage.kind,
+          costUsd: aiUsage.costUsd,
+        })
+        .from(aiUsage)
+        .where(gte(aiUsage.at, since)),
     ])
 
     const weekIndex = (t: number) =>
@@ -200,8 +221,38 @@ export const dashboard = defineAction({
         row.at.getTime() >= month
     ).length
 
-    const trend = (weekly: number[], scale = 1): Trend => {
-      const values = weekly.map((v) => Math.round((v / scale) * 10) / 10)
+    // The agent's calls: cost by week, and this month's count by kind.
+    const costByWeek = zeros()
+    const aiMonth = { costUsd: 0, summaries: 0, answers: 0 }
+    for (const call of calls) {
+      const t = call.at.getTime()
+      const i = weekIndex(t)
+      if (i >= 0) costByWeek[i] += call.costUsd
+      if (t < month) continue
+      aiMonth.costUsd += call.costUsd
+      if (call.kind === "answer") aiMonth.answers += 1
+      else aiMonth.summaries += 1
+    }
+
+    // A personal meeting is filed under its opener's username: show their
+    // name instead.
+    const openers = filed
+      .filter((rec) => !rec.group && rec.opener)
+      .map((rec) => rec.opener)
+    const names = new Map(
+      openers.length === 0
+        ? []
+        : (
+            await db
+              .select({ username: user.username, name: user.name })
+              .from(user)
+              .where(inArray(user.username, [...new Set(openers)]))
+          ).map((row) => [row.username ?? "", row.name])
+    )
+
+    const trend = (weekly: number[], scale = 1, digits = 1): Trend => {
+      const round = 10 ** digits
+      const values = weekly.map((v) => Math.round((v / scale) * round) / round)
       return {
         value: values[weeks - 1],
         last: values[weeks - 2],
@@ -229,11 +280,16 @@ export const dashboard = defineAction({
       groups: [...groups.entries()]
         .map(([name, g]) => ({
           name,
+          label: names.get(name),
           meetings: g.rooms.size,
           minutes: Math.round(g.minutes),
         }))
         .sort((a, b) => b.minutes - a.minutes),
       recordings: { count: recordingCount, bytes, failed },
+      ai: {
+        cost: trend(costByWeek, 1, 2),
+        month: { ...aiMonth, costUsd: Math.round(aiMonth.costUsd * 100) / 100 },
+      },
     }
   },
 })

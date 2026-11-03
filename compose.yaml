@@ -49,8 +49,9 @@ services:
   # microphone to the lab's transcribe service in 60 s chunks (at most 2 jobs in
   # flight, 429 retried with back-off) and has a small
   # model keep one summary (questions, improvements, decisions) that the
-  # meeting page shows. Same LiveKit env as web, plus TRANSCRIBE_TOKEN and
-  # ANTHROPIC_API_KEY.
+  # meeting page shows. Same LiveKit env as web, plus TRANSCRIBE_TOKEN,
+  # ANTHROPIC_API_KEY and MEET_SERVICE_KEY (its summary:<key> entry in
+  # SERVICE_KEYS, for reporting what each Claude call cost).
   summary:
     image: ghcr.io/nycu-winlab/meet-summary:${MEET_VERSION:-main}
     restart: unless-stopped
