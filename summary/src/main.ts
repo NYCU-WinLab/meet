@@ -49,6 +49,10 @@ const MENTION = /@agent\b/i
 // The meeting page names a chat message carrying this attribute "agent":
 // the agent is hidden, so the page cannot look its name up.
 const AGENT_ATTRIBUTE = "meet.agent"
+/** Set by a member whose microphone several people in one room share. */
+const ROOM_MIC_ATTRIBUTE = "meet.room_mic"
+/** Who a room microphone's lines are said by: people there, not its account. */
+const ROOM = "會議室"
 
 function need(name: string) {
   const value = process.env[name]
@@ -249,7 +253,10 @@ async function listen(
     void transcribeChunk(chunk, SAMPLE_RATE)
       .then((text) => {
         if (!text) return
-        meeting.lines.push({ at, who, text })
+        // Read at each chunk: the switch can change mid-meeting.
+        const said =
+          participant.attributes[ROOM_MIC_ATTRIBUTE] === "1" ? ROOM : who
+        meeting.lines.push({ at, who: said, text })
         log(meeting.name, who, "heard", text.length, "chars")
       })
       .catch((error) => log(meeting.name, who, "transcribe failed", error))

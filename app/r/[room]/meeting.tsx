@@ -15,7 +15,12 @@ import {
   VideoTrack,
   type TrackReferenceOrPlaceholder,
 } from "@livekit/components-react"
-import { ConnectionQuality, ConnectionState, Track } from "livekit-client"
+import {
+  ConnectionQuality,
+  ConnectionState,
+  ParticipantEvent,
+  Track,
+} from "livekit-client"
 import {
   CircleCheckIcon,
   CircleDashedIcon,
@@ -30,6 +35,7 @@ import {
   PinIcon,
   PinOffIcon,
   SignalLowIcon,
+  UsersRoundIcon,
   VideoIcon,
   VideoOffIcon,
 } from "lucide-react"
@@ -97,6 +103,7 @@ export function Meeting({
       <RoomAudioRenderer />
       <SummaryListener onSummary={setSummary} />
       <Shortcuts />
+      <RestoreRoomMic />
       <Reconnecting />
       {/* A phone shows the open panel instead of the stage; wider screens show both. */}
       <div
@@ -295,6 +302,7 @@ function Controls({
     useLocalParticipant()
   const mic = useTrackToggle({ source: Track.Source.Microphone })
   const camera = useTrackToggle({ source: Track.Source.Camera })
+  const roomMic = useRoomMic()
   const wasSharing = React.useRef(false)
   const screen = useTrackToggle({
     source: Track.Source.ScreenShare,
@@ -332,6 +340,15 @@ function Controls({
           onClick={() => camera.toggle()}
         >
           {isCameraEnabled ? <VideoIcon /> : <VideoOffIcon />}
+        </Control>
+        <Control
+          label={
+            roomMic.on ? "關閉會議室收音" : "會議室收音（多人共用這支麥克風）"
+          }
+          active={roomMic.on}
+          onClick={() => void roomMic.set(!roomMic.on)}
+        >
+          <UsersRoundIcon />
         </Control>
         <Control
           label={isScreenShareEnabled ? "停止分享螢幕" : "分享螢幕"}
@@ -390,6 +407,67 @@ function Controls({
       </div>
     </TooltipProvider>
   )
+}
+
+// Room microphone: several people in one room share this microphone, so the
+// summary says "會議室" for what it hears instead of this member's name. It is
+// a participant attribute the summary service reads, and this browser
+// remembers it for the next meeting.
+const ROOM_MIC_ATTRIBUTE = "meet.room_mic"
+const ROOM_MIC_KEY = "meet.room-mic"
+
+function useRoomMic() {
+  const { localParticipant } = useLocalParticipant()
+  const [on, setOn] = React.useState(false)
+  React.useEffect(() => {
+    const sync = () =>
+      setOn(localParticipant.attributes[ROOM_MIC_ATTRIBUTE] === "1")
+    sync()
+    localParticipant.on(ParticipantEvent.AttributesChanged, sync)
+    return () => {
+      localParticipant.off(ParticipantEvent.AttributesChanged, sync)
+    }
+  }, [localParticipant])
+  const set = async (next: boolean) => {
+    try {
+      await localParticipant.setAttributes({
+        [ROOM_MIC_ATTRIBUTE]: next ? "1" : "",
+      })
+    } catch {
+      toast.error("切換會議室收音失敗，請再試一次")
+      return
+    }
+    try {
+      localStorage.setItem(ROOM_MIC_KEY, next ? "1" : "")
+    } catch {}
+    toast(next ? "已開啟會議室收音" : "已關閉會議室收音", {
+      description: next
+        ? "摘要把這支麥克風的話記成「會議室」，不記在你名下。"
+        : undefined,
+    })
+  }
+  return { on, set }
+}
+
+// Turns the room microphone back on once connected, if this browser had it.
+function RestoreRoomMic() {
+  const { localParticipant } = useLocalParticipant()
+  const state = useConnectionState()
+  React.useEffect(() => {
+    if (state !== ConnectionState.Connected) return
+    let saved = ""
+    try {
+      saved = localStorage.getItem(ROOM_MIC_KEY) ?? ""
+    } catch {}
+    if (
+      saved === "1" &&
+      localParticipant.attributes[ROOM_MIC_ATTRIBUTE] !== "1"
+    )
+      void localParticipant
+        .setAttributes({ [ROOM_MIC_ATTRIBUTE]: "1" })
+        .catch(() => {})
+  }, [state, localParticipant])
+  return null
 }
 
 const isSafari = () =>
