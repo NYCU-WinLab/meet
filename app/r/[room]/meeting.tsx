@@ -1,4 +1,3 @@
-"use client"
 
 import {
   LiveKitRoom,
@@ -342,9 +341,7 @@ function Controls({
           {isCameraEnabled ? <VideoIcon /> : <VideoOffIcon />}
         </Control>
         <Control
-          label={
-            roomMic.on ? "關閉會議室收音" : "會議室收音（多人共用這支麥克風）"
-          }
+          label={roomMic.on ? "關閉會議室收音" : "會議室收音"}
           active={roomMic.on}
           onClick={() => void roomMic.set(!roomMic.on)}
         >
@@ -440,11 +437,7 @@ function useRoomMic() {
     try {
       localStorage.setItem(ROOM_MIC_KEY, next ? "1" : "")
     } catch {}
-    toast(next ? "已開啟會議室收音" : "已關閉會議室收音", {
-      description: next
-        ? "摘要把這支麥克風的話記成「會議室」，不記在你名下。"
-        : undefined,
-    })
+    toast(next ? "已開啟會議室收音" : "已關閉會議室收音")
   }
   return { on, set }
 }
