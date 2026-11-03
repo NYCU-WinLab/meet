@@ -381,10 +381,22 @@ function recordKeys(rec: Recording) {
   if (rec.booking) return [rec.booking]
   const owner = rec.group || rec.opener
   if (!owner) return []
-  const day = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Taipei",
-  }).format(rec.startedAt)
+  const day = taipeiDay(rec.startedAt)
   return [`meet:${owner}:${day}:${rec.id}`, `meet:${owner}:${day}`]
+}
+
+const taipeiDay = (date: Date) =>
+  new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Taipei" }).format(date)
+
+/** The name winlab-helper gives the recording in its record. */
+function recordFile(rec: Recording) {
+  const owner = rec.group || rec.opener
+  if (!owner) return undefined
+  return {
+    fileName: `[${owner}] ${taipeiDay(rec.startedAt)} ${rec.title}.mp4`,
+    title: rec.title,
+    since: rec.startedAt,
+  }
 }
 
 export const getRecording = defineAction({
@@ -410,7 +422,7 @@ export const getRecording = defineAction({
           })
         : null,
       gitlabConfigured()
-        ? recordUrl(recordKeys(rec)).catch((error) => {
+        ? recordUrl(recordKeys(rec), recordFile(rec)).catch((error) => {
             emitErrorLog(error, { source: "gitlab record" })
             return null
           })
