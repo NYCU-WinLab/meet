@@ -1,0 +1,399 @@
+"use client"
+
+import {
+  useChat,
+  useLocalParticipant,
+  useParticipants,
+  type ReceivedChatMessage,
+} from "@livekit/components-react"
+import { BotIcon, SendIcon } from "lucide-react"
+import * as React from "react"
+
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { cn } from "@/lib/utils"
+
+// The meeting chat, laid out like Discord: a picture and a name on the
+// first of a run of messages from one person, the rest under it. @name
+// mentions anyone in the room or the agent, and links open in a new tab.
+
+/** Who a message can mention: everyone in the room, and the agent. */
+type Person = { identity: string; name: string; agent?: boolean }
+
+const AGENT: Person = { identity: "agent", name: "agent", agent: true }
+
+/** Messages from one person within 5 minutes share one header. */
+const RUN_MS = 5 * 60 * 1000
+
+export function Chat() {
+  const { chatMessages, send, isSending } = useChat()
+  const { localParticipant } = useLocalParticipant()
+  const participants = useParticipants()
+  const bottom = React.useRef<HTMLLIElement>(null)
+
+  const people = React.useMemo<Person[]>(
+    () => [
+      ...participants.map((p) => ({
+        identity: p.identity,
+        name: p.name || p.identity,
+      })),
+      AGENT,
+    ],
+    [participants]
+  )
+  const myName = localParticipant.name || localParticipant.identity
+
+  React.useEffect(() => {
+    bottom.current?.scrollIntoView({ block: "end" })
+  }, [chatMessages.length])
+
+  return (
+    <section className="flex min-h-0 flex-1 basis-0 flex-col border-t">
+      <h2 className="px-4 pt-4 text-muted-foreground">聊天</h2>
+      <ol className="flex min-h-0 flex-1 flex-col overflow-y-auto py-2">
+        {chatMessages.length === 0 && (
+          <li className="px-4 py-2 text-muted-foreground">還沒有人說話</li>
+        )}
+        {chatMessages.map((message, i) => {
+          const sender = senderOf(message, localParticipant.identity)
+          const previous = chatMessages[i - 1]
+          const continued =
+            previous !== undefined &&
+            senderOf(previous, localParticipant.identity).key === sender.key &&
+            message.timestamp - previous.timestamp < RUN_MS
+          const mentioned = !sender.mine && mentions(message.message, myName)
+          return (
+            <li
+              key={message.id ?? message.timestamp}
+              className={cn(
+                "flex gap-3 border-l-2 border-transparent px-4 transition-colors duration-state hover:bg-background/60",
+                continued ? "py-0.5" : "mt-3 py-0.5",
+                mentioned && "border-primary bg-primary/10 hover:bg-primary/15"
+              )}
+            >
+              {continued ? (
+                <span aria-hidden className="w-10 shrink-0" />
+              ) : (
+                <Avatar sender={sender} />
+              )}
+              <div className="flex min-w-0 flex-1 flex-col">
+                {!continued && (
+                  <div className="flex items-baseline gap-2">
+                    <span className="truncate font-medium">{sender.name}</span>
+                    <time
+                      dateTime={new Date(message.timestamp).toISOString()}
+                      className="shrink-0 text-muted-foreground tabular-nums"
+                    >
+                      {clock(message.timestamp)}
+                    </time>
+                  </div>
+                )}
+                <p className="leading-7 break-words whitespace-pre-wrap">
+                  <RichText
+                    text={message.message}
+                    people={people}
+                    me={myName}
+                  />
+                </p>
+              </div>
+            </li>
+          )
+        })}
+        <li ref={bottom} aria-hidden />
+      </ol>
+      <Composer
+        people={people.filter((p) => p.identity !== localParticipant.identity)}
+        disabled={isSending}
+        onSend={send}
+      />
+    </section>
+  )
+}
+
+type Sender = {
+  key: string
+  identity: string | null
+  name: string
+  mine: boolean
+  agent: boolean
+}
+
+function senderOf(message: ReceivedChatMessage, me: string): Sender {
+  // The agent is hidden, so its replies carry a mark instead of a sender.
+  if (message.attributes?.["meet.agent"] === "1")
+    return {
+      key: "agent",
+      identity: null,
+      name: "agent",
+      mine: false,
+      agent: true,
+    }
+  const identity = message.from?.identity ?? null
+  return {
+    key: identity ?? "unknown",
+    identity,
+    name: message.from?.name || identity || "某人",
+    mine: identity === me,
+    agent: false,
+  }
+}
+
+// A member's portal picture, or their initial when they have none.
+function Avatar({
+  sender,
+  small = false,
+}: {
+  sender: Sender
+  small?: boolean
+}) {
+  const [failed, setFailed] = React.useState(false)
+  const base = cn(
+    "flex shrink-0 items-center justify-center overflow-hidden rounded-full",
+    small ? "size-6" : "mt-1 size-10"
+  )
+  if (sender.agent)
+    return (
+      <span
+        aria-hidden
+        className={cn(base, "bg-primary text-primary-foreground")}
+      >
+        <BotIcon className={small ? "size-4" : "size-5"} />
+      </span>
+    )
+  if (!sender.identity || failed)
+    return (
+      <span
+        aria-hidden
+        className={cn(base, "bg-primary font-medium text-primary-foreground")}
+      >
+        {sender.name.slice(0, 1)}
+      </span>
+    )
+  return (
+    // eslint-disable-next-line @next/next/no-img-element -- a small private avatar from our own route; next/image would only proxy it again.
+    <img
+      src={`/avatars/${encodeURIComponent(sender.identity)}`}
+      alt=""
+      onError={() => setFailed(true)}
+      className={cn(base, "bg-muted object-cover")}
+    />
+  )
+}
+
+const clock = (at: number) =>
+  new Date(at).toLocaleTimeString("zh-TW", {
+    hour12: false,
+    hour: "2-digit",
+    minute: "2-digit",
+  })
+
+const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+
+/** Whether the text mentions this name with @. */
+function mentions(text: string, name: string) {
+  return new RegExp(`@${escape(name)}(?![\\p{L}\\p{N}_])`, "u").test(text)
+}
+
+const URL_PATTERN = "https?:\\/\\/[^\\s<>\"'）」】]+"
+
+// Text with links and @mentions picked out. Links lose trailing punctuation
+// a sentence put after them; a mention matches a name in the room, longest
+// name first, so "@王小明" is not read as "@王小".
+function RichText({
+  text,
+  people,
+  me,
+}: {
+  text: string
+  people: Person[]
+  me: string
+}) {
+  const names = [...new Set(people.map((p) => p.name))].sort(
+    (a, b) => b.length - a.length
+  )
+  const pattern = new RegExp(
+    names.length > 0
+      ? `(${URL_PATTERN})|@(${names.map(escape).join("|")})(?![\\p{L}\\p{N}_])`
+      : `(${URL_PATTERN})`,
+    "gu"
+  )
+  const parts: React.ReactNode[] = []
+  let last = 0
+  for (const match of text.matchAll(pattern)) {
+    const at = match.index
+    if (at > last) parts.push(text.slice(last, at))
+    if (match[1]) {
+      const url = match[1].replace(/[.,;:!?。，；：！？)]+$/, "")
+      parts.push(
+        <a
+          key={at}
+          href={url}
+          target="_blank"
+          rel="noreferrer"
+          className="break-all text-primary underline underline-offset-4 hover:decoration-2"
+        >
+          {url}
+        </a>
+      )
+      last = at + url.length
+    } else {
+      const name = match[2]
+      parts.push(
+        <span
+          key={at}
+          className={cn(
+            "rounded-control px-1 font-medium text-primary",
+            name === me ? "bg-primary/25" : "bg-primary/15"
+          )}
+        >
+          @{name}
+        </span>
+      )
+      last = at + match[0].length
+    }
+  }
+  if (last < text.length) parts.push(text.slice(last))
+  return <>{parts}</>
+}
+
+// The message box. Typing @ lists the people to mention; arrows move, Enter
+// or Tab picks, Escape closes.
+function Composer({
+  people,
+  disabled,
+  onSend,
+}: {
+  people: Person[]
+  disabled: boolean
+  onSend: (text: string) => Promise<unknown>
+}) {
+  const input = React.useRef<HTMLInputElement>(null)
+  const [draft, setDraft] = React.useState("")
+  const [query, setQuery] = React.useState<{
+    start: number
+    text: string
+  } | null>(null)
+  const [active, setActive] = React.useState(0)
+
+  const matches = query
+    ? people
+        .filter((p) => p.name.toLowerCase().includes(query.text.toLowerCase()))
+        .slice(0, 6)
+    : []
+  const open = query !== null && matches.length > 0
+
+  function track(value: string, caret: number) {
+    const before = value.slice(0, caret)
+    const at = before.lastIndexOf("@")
+    const typed = at >= 0 ? before.slice(at + 1) : ""
+    const startsWord = at === 0 || (at > 0 && /\s/.test(before[at - 1]))
+    setQuery(
+      at >= 0 && startsWord && !/\s/.test(typed)
+        ? { start: at, text: typed }
+        : null
+    )
+    setActive(0)
+  }
+
+  function pick(person: Person) {
+    if (!query) return
+    const caret = query.start + 1 + query.text.length
+    const next = `${draft.slice(0, query.start)}@${person.name} ${draft.slice(caret)}`
+    const position = query.start + person.name.length + 2
+    setDraft(next)
+    setQuery(null)
+    requestAnimationFrame(() => {
+      input.current?.focus()
+      input.current?.setSelectionRange(position, position)
+    })
+  }
+
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const text = draft.trim()
+    if (!text) return
+    setDraft("")
+    setQuery(null)
+    await onSend(text)
+  }
+
+  return (
+    <form onSubmit={submit} className="relative flex gap-2 p-4 pt-2">
+      {open && (
+        <ul
+          role="listbox"
+          aria-label="提及"
+          className="absolute right-4 bottom-full left-4 z-10 flex flex-col overflow-hidden rounded-menu border bg-background p-1 shadow-lg"
+        >
+          {matches.map((person, i) => (
+            <li
+              key={person.identity}
+              role="option"
+              aria-selected={i === active}
+              onMouseDown={(event) => {
+                event.preventDefault()
+                pick(person)
+              }}
+              onMouseEnter={() => setActive(i)}
+              className={cn(
+                "flex cursor-pointer items-center gap-2 rounded-control px-2 py-1",
+                i === active && "bg-muted"
+              )}
+            >
+              <Avatar
+                sender={{
+                  key: person.identity,
+                  identity: person.agent ? null : person.identity,
+                  name: person.name,
+                  mine: false,
+                  agent: person.agent ?? false,
+                }}
+                small
+              />
+              <span className="truncate">{person.name}</span>
+              {person.agent && (
+                <span className="text-muted-foreground">問會議或上網查</span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      <Input
+        ref={input}
+        value={draft}
+        onChange={(event) => {
+          setDraft(event.target.value)
+          track(event.target.value, event.target.selectionStart ?? 0)
+        }}
+        onKeyDown={(event) => {
+          if (!open) return
+          if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+            event.preventDefault()
+            const step = event.key === "ArrowDown" ? 1 : -1
+            setActive((i) => (i + step + matches.length) % matches.length)
+          } else if (event.key === "Enter" || event.key === "Tab") {
+            event.preventDefault()
+            pick(matches[active])
+          } else if (event.key === "Escape") {
+            event.preventDefault()
+            setQuery(null)
+          }
+        }}
+        placeholder="說點什麼，@ 提及別人或 agent"
+        aria-label="訊息"
+        aria-expanded={open}
+        aria-autocomplete="list"
+        maxLength={2000}
+      />
+      <Button
+        type="submit"
+        size="icon"
+        variant="outline"
+        aria-label="送出"
+        disabled={disabled || !draft.trim()}
+      >
+        <SendIcon />
+      </Button>
+    </form>
+  )
+}
