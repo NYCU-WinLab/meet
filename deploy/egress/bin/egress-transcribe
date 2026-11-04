@@ -55,6 +55,39 @@ sha_of() { [ -s "$1" ] && sha256sum "$1" | cut -c1-64; }
 # pending file with dir=1, the month folder for one written before that.
 remote_dir() { if [ -n "${dir:-}" ]; then echo "${folder%%/*}/$(urlencode "$stem")"; else echo "$folder"; fi; }
 tx() { curl -g -sS -H "Authorization: Bearer $TX_TOKEN" "$@"; }
+# Sends a file to transcribe; prints the job id, or logs why it failed and
+# returns 1. Same function in egress-upload.
+tx_submit() { # <file>
+  local out code
+  out=$(mktemp)
+  code=$(curl -g -sS -o "$out" -w "%{http_code}" --max-time 1800 -H "Authorization: Bearer $TX_TOKEN" \
+    -F "file=@$1" -F language=zh -F diarize=true "$TX/api/jobs")
+  if python3 -c 'import json,sys; j=json.load(open(sys.argv[1])).get("job_id",""); print(j); sys.exit(0 if j else 1)' "$out" 2>/dev/null; then
+    rm -f "$out"; return 0
+  fi
+  echo "transcribe submit -> $code: $(head -c 200 "$out" | tr '\n' ' ')" >&2
+  rm -f "$out"; return 1
+}
+# A recording transcribe did not take: try again every 10 minutes; after 6
+# hours hand it to the helper as transcript failed, so it runs its own ASR.
+resubmit() { # <pending>; needs the pending file's fields in scope
+  local pending=$1 new tmp now
+  now=$(date +%s)
+  [ $((now - $(stat -c %Y "$pending"))) -ge 600 ] || return 0
+  if new=$(tx_submit "$STATE/$job.mp4"); then
+    grep -vE '^(job|need_submit|submit_since)=' "$pending" > "$STATE/$new.pending.tmp"
+    printf 'job=%q\n' "$new" >> "$STATE/$new.pending.tmp"
+    mv "$STATE/$job.mp4" "$STATE/$new.mp4"
+    mv "$STATE/$new.pending.tmp" "$STATE/$new.pending" && rm -f "$pending"
+    echo "transcribe job $new (resubmitted): $stem"
+  elif [ $((now - ${submit_since:-0})) -ge 21600 ]; then
+    echo "transcribe never took it, handing off without a transcript: $stem" >&2
+    printf 'need_submit=\ntx_job=\n' >> "$pending"
+    tmp=$(mktemp -d); finish "$pending" "$job" "$tmp/t.srt" failed none "$tmp"; rm -rf "${tmp:?}"
+  else
+    touch "$pending"
+  fi
+}
 put() { # put <local> <remote path under NC_DIR>
   local code
   code=$(curl -g -sS -o /dev/null -w "%{http_code}" -u "$AUTH" -T "$1" "$DAV/$NC_DIR/$2")
@@ -128,7 +161,7 @@ hand_off() { # <pending>; needs the pending file's fields in scope
     [START_TIME]=${start:-} [END_TIME]=${end:-} [BOOKING_REQUEST_ID]=${booking:-})
   if [ -n "${dir:-}" ]; then
     v[DL_URL]="$root$(urlencode "$stem").mp4"
-    v[RELAY_VERSION]=2 v[TX_JOB_ID]=$job
+    v[RELAY_VERSION]=2 v[TX_JOB_ID]=${tx_job-$job}
     v[TRANSCRIPT_STATUS]=${tx_status:-failed} v[TRANSCRIPT_SHA256]=${sha_txt:-} v[SUBTITLE_SHA256]=${sha_srt:-}
     v[NOTES_STATUS]=${notes_status:-none} v[NOTES_SHA256]=${sha_notes_md:-} v[NOTES_JSON_SHA256]=${sha_notes_json:-}
     fields="$fields RELAY_VERSION TX_JOB_ID TRANSCRIPT_STATUS TRANSCRIPT_SHA256 SUBTITLE_SHA256 NOTES_STATUS NOTES_SHA256 NOTES_JSON_SHA256"
@@ -153,10 +186,11 @@ print(hmac.new(os.environ["HELPER_RELAY_SECRET"].encode(), payload.encode(), has
 
 for pending in "$STATE"/*.pending; do
   unset job folder dir stem room egress start end group person booking subject sha notes_asked finished share secret \
-    tx_status notes_status sha_txt sha_srt sha_notes_md sha_notes_json
+    tx_status notes_status sha_txt sha_srt sha_notes_md sha_notes_json need_submit submit_since tx_job
   . "$pending"   # job, folder, stem, the recording's fields, maybe notes_asked / finished / share / statuses
   [ -n "${job:-}" ] && [ -n "${stem:-}" ] || { echo "bad state file: $pending" >&2; continue; }
   if [ -n "${finished:-}" ]; then hand_off "$pending" && rm -f "$STATE/$job.mp4" "$pending"; continue; fi
+  if [ -n "${need_submit:-}" ]; then resubmit "$pending"; continue; fi
   stage=$(tx "$TX/api/jobs/$job" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("stage",""))' 2>/dev/null)
   case "$stage" in
     done) ;;
