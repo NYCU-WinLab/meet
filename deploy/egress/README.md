@@ -20,7 +20,8 @@ Files for the 2 LiveKit Egress VMs (`egress01`, `egress02`). Both run the same c
 2. The timer runs the service every minute.
 3. `egress-upload` waits for the `EG_*.json` manifest, sends the MP4 to transcribe, and uploads it to Nextcloud under `meet/<YYYY-MM>/<stem>/`.
 4. Parts of one booking wait in `/var/lib/egress-hold/<booking>/` until 1 hour after the booking ends, then ffmpeg joins them.
-5. `egress-transcribe` puts the transcript, subtitles and notes next to the MP4 (`<stem>.txt`, `.srt`, `.notes.md`, `.notes.json`), then sends the hand-off to winlab-helper's trigger.
+5. When transcribe does not take the MP4, it stays in `/var/lib/egress-transcribe/retry-<sha>.mp4` with `need_submit=1`. `egress-transcribe` sends it again every 10 minutes. After 6 hours it hands the recording off with `TRANSCRIPT_STATUS=failed` and an empty `TX_JOB_ID`, so the helper runs its own ASR.
+6. `egress-transcribe` puts the transcript, subtitles and notes next to the MP4 (`<stem>.txt`, `.srt`, `.notes.md`, `.notes.json`), then sends the hand-off to winlab-helper's trigger.
 
 ## Empty stretches cut
 

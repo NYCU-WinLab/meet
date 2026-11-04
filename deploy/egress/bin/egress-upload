@@ -58,6 +58,21 @@ PY
 
 urlencode() { python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1]))' "$1"; }
 
+STATE=/var/lib/egress-transcribe
+# Sends a file to transcribe; prints the job id, or logs why it failed and
+# returns 1. Same function in egress-transcribe.
+tx_submit() { # <file>
+  local out code
+  out=$(mktemp)
+  code=$(curl -g -sS -o "$out" -w "%{http_code}" --max-time 1800 -H "Authorization: Bearer $TX_TOKEN" \
+    -F "file=@$1" -F language=zh -F diarize=true "${TX_URL:-https://transcribe.winlab.tw}/api/jobs")
+  if python3 -c 'import json,sys; j=json.load(open(sys.argv[1])).get("job_id",""); print(j); sys.exit(0 if j else 1)' "$out" 2>/dev/null; then
+    rm -f "$out"; return 0
+  fi
+  echo "transcribe submit -> $code: $(head -c 200 "$out" | tr '\n' ' ')" >&2
+  rm -f "$out"; return 1
+}
+
 # Uploads one file to Nextcloud, hands it to transcribe and removes it.
 # Each recording gets its own folder, meet/<YYYY-MM>/<stem>/, so its
 # transcript, subtitles and notes sit beside it and one folder share hands
@@ -122,18 +137,19 @@ ship() { # <local_path> <name>
   file_with_meet "$month/$stem" "$stem" "$(stat -c %s "$local_path")" "$(date -u -r "$local_path" +%Y-%m-%dT%H:%M:%SZ)"
   # Hand the recording to transcribe before it goes; egress-transcribe
   # collects the transcript when the job is done.
+  # A failed submit keeps the MP4 under a placeholder id with need_submit=1;
+  # egress-transcribe sends it again until transcribe takes it.
   if [ -n "${TX_TOKEN:-}" ]; then
-    job=$(curl -g -sS -H "Authorization: Bearer $TX_TOKEN" -F "file=@$local_path" -F language=zh -F diarize=true "${TX_URL:-https://transcribe.winlab.tw}/api/jobs" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("job_id",""))' 2>/dev/null)
-    if [ -n "$job" ]; then
-      mkdir -p /var/lib/egress-transcribe
-      # dir=1: the recording has its own folder (hand-off v2).
-      printf 'job=%q\nfolder=%q\ndir=1\nstem=%q\nroom=%q\negress=%q\nstart=%q\nend=%q\ngroup=%q\nperson=%q\nbooking=%q\nsubject=%q\nsha=%q\n' \
-        "$job" "$month/$stem" "$stem" "$room" "$egress" "$start" "$end" "$group" "$person" "$booking" "$subject" "$sha" > "/var/lib/egress-transcribe/$job.pending"
-      mv "$local_path" "/var/lib/egress-transcribe/$job.mp4"
-      echo "transcribe job $job: $name"
-    else
-      echo "transcribe submit failed: $name" >&2
-    fi
+    local retry=
+    job=$(tx_submit "$local_path") || { job="retry-${sha:0:16}"; retry=1; }
+    mkdir -p "$STATE"
+    # dir=1: the recording has its own folder (hand-off v2).
+    printf 'job=%q\nfolder=%q\ndir=1\nstem=%q\nroom=%q\negress=%q\nstart=%q\nend=%q\ngroup=%q\nperson=%q\nbooking=%q\nsubject=%q\nsha=%q\n' \
+      "$job" "$month/$stem" "$stem" "$room" "$egress" "$start" "$end" "$group" "$person" "$booking" "$subject" "$sha" > "$STATE/$job.pending"
+    [ -z "$retry" ] || printf 'need_submit=1\nsubmit_since=%s\n' "$(date +%s)" >> "$STATE/$job.pending"
+    mv "$local_path" "$STATE/$job.mp4"
+    if [ -n "$retry" ]; then echo "transcribe submit failed, will retry as $job: $name" >&2
+    else echo "transcribe job $job: $name"; fi
   fi
   rm -f "$local_path"
   return 0
