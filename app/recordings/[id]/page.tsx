@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation"
 
 import { FieldList, FieldRow } from "@/components/field-list"
+import { Markdown } from "@/components/markdown"
 import { MeetShell } from "@/components/meet-shell"
 import { PageHeader, SectionHeader } from "@/components/page-header"
 import { buttonVariants } from "@/components/ui/button"
@@ -129,7 +130,7 @@ export default async function RecordingPage({
         <section className="flex flex-col gap-6">
           <SectionHeader title="摘要" />
           {rec.notes ? (
-            <div className="whitespace-pre-wrap">{rec.notes}</div>
+            <Markdown>{rec.notes}</Markdown>
           ) : (
             <p className="text-muted-foreground">還沒有摘要</p>
           )}
