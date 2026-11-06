@@ -68,6 +68,7 @@ import {
   useHandQueue,
   useMyHand,
 } from "./raise-hand"
+import { PipControl } from "./pip"
 
 // One meeting: everyone's camera (or their name when it is off), a shared
 // screen when there is one, and the member's own controls. Camera and
@@ -429,6 +430,7 @@ function Controls({
           </TooltipTrigger>
           <TooltipContent>複製會議連結</TooltipContent>
         </Tooltip>
+        <PipControl />
         <Divider />
         <Tooltip>
           <TooltipTrigger
