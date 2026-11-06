@@ -20,6 +20,7 @@ import {
   ConnectionState,
   DisconnectReason,
   ParticipantEvent,
+  Room,
   Track,
   type RoomOptions,
 } from "livekit-client"
@@ -29,7 +30,10 @@ import {
   CircleCheckIcon,
   HandIcon,
   CircleDashedIcon,
+  CaptionsIcon,
+  CaptionsOffIcon,
   CircleDotIcon,
+  EllipsisIcon,
   LinkIcon,
   LogOutIcon,
   MicIcon,
@@ -40,6 +44,7 @@ import {
   PinIcon,
   PinOffIcon,
   SignalLowIcon,
+  SwitchCameraIcon,
   UsersRoundIcon,
   VideoIcon,
   VideoOffIcon,
@@ -52,6 +57,12 @@ import { toast } from "sonner"
 import { Chat, OPEN_CHAT_EVENT } from "@/components/chat"
 import { Markdown } from "@/components/markdown"
 import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   Tooltip,
@@ -61,7 +72,12 @@ import {
 } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 
-import { Captions, CaptionsControl, CaptionsProvider } from "./captions"
+import {
+  Captions,
+  CaptionsControl,
+  CaptionsProvider,
+  useCaptions,
+} from "./captions"
 import { DeviceMenu } from "./device-menu"
 import { HostProvider, ModerationListener, TileModeration } from "./host"
 import type { MediaChoices } from "./lobby"
@@ -376,7 +392,9 @@ function Controls({
     <TooltipProvider>
       <div className="flex items-center gap-3">
         <RecordingState />
-        <Divider />
+        <span className="contents max-md:hidden">
+          <Divider />
+        </span>
         <div className="flex items-center gap-1">
           <Control
             label={`${isMicrophoneEnabled ? "關麥克風" : "開麥克風"}（${MOD}D）`}
@@ -386,7 +404,9 @@ function Controls({
           >
             {isMicrophoneEnabled ? <MicIcon /> : <MicOffIcon />}
           </Control>
-          <DeviceMenu kind="audioinput" label="麥克風" />
+          <span className="contents max-md:hidden">
+            <DeviceMenu kind="audioinput" label="麥克風" />
+          </span>
         </div>
         <div className="flex items-center gap-1">
           <Control
@@ -397,33 +417,39 @@ function Controls({
           >
             {isCameraEnabled ? <VideoIcon /> : <VideoOffIcon />}
           </Control>
-          <DeviceMenu kind="videoinput" label="鏡頭" />
+          <span className="contents max-md:hidden">
+            <DeviceMenu kind="videoinput" label="鏡頭" />
+          </span>
         </div>
-        <Control
-          label={roomMic.on ? "關閉會議室收音" : "會議室收音"}
-          active={roomMic.on}
-          onClick={() => void roomMic.set(!roomMic.on)}
-        >
-          <UsersRoundIcon />
-        </Control>
-        <Control
-          label={isScreenShareEnabled ? "停止分享螢幕" : "分享螢幕"}
-          active={isScreenShareEnabled}
-          pending={screen.pending}
-          onClick={() => screen.toggle()}
-        >
-          {isScreenShareEnabled ? <MonitorXIcon /> : <MonitorUpIcon />}
-        </Control>
+        <div className="flex items-center gap-3 max-md:hidden">
+          <Control
+            label={roomMic.on ? "關閉會議室收音" : "會議室收音"}
+            active={roomMic.on}
+            onClick={() => void roomMic.set(!roomMic.on)}
+          >
+            <UsersRoundIcon />
+          </Control>
+          <Control
+            label={isScreenShareEnabled ? "停止分享螢幕" : "分享螢幕"}
+            active={isScreenShareEnabled}
+            pending={screen.pending}
+            onClick={() => screen.toggle()}
+          >
+            {isScreenShareEnabled ? <MonitorXIcon /> : <MonitorUpIcon />}
+          </Control>
+        </div>
         <ReactionPicker />
-        <CaptionsControl />
-        <Control
-          label={hand.up ? "放下手" : "舉手"}
-          active={!hand.up}
-          onClick={() => void hand.set(!hand.up)}
-        >
-          <HandIcon />
-        </Control>
-        <Divider />
+        <div className="flex items-center gap-3 max-md:hidden">
+          <CaptionsControl />
+          <Control
+            label={hand.up ? "放下手" : "舉手"}
+            active={!hand.up}
+            onClick={() => void hand.set(!hand.up)}
+          >
+            <HandIcon />
+          </Control>
+          <Divider />
+        </div>
         <Control
           label={
             (open ? "收起摘要與聊天" : "摘要與聊天") +
@@ -435,26 +461,31 @@ function Controls({
         >
           <MessagesSquareIcon />
         </Control>
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                variant="outline"
-                size="icon"
-                aria-label="複製會議連結"
-                onClick={async () => {
-                  await navigator.clipboard.writeText(window.location.href)
-                  toast.success("已複製會議連結")
-                }}
-              />
-            }
-          >
-            <LinkIcon />
-          </TooltipTrigger>
-          <TooltipContent>複製會議連結</TooltipContent>
-        </Tooltip>
-        <PipControl />
-        <Divider />
+        <MoreMenu
+          roomMic={roomMic}
+          hand={hand}
+          sharing={isScreenShareEnabled}
+          onShare={() => screen.toggle()}
+        />
+        <div className="flex items-center gap-3 max-md:hidden">
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="outline"
+                  size="icon"
+                  aria-label="複製會議連結"
+                  onClick={() => void copyLink()}
+                />
+              }
+            >
+              <LinkIcon />
+            </TooltipTrigger>
+            <TooltipContent>複製會議連結</TooltipContent>
+          </Tooltip>
+          <PipControl />
+          <Divider />
+        </div>
         <Tooltip>
           <TooltipTrigger
             render={
@@ -472,6 +503,95 @@ function Controls({
         </Tooltip>
       </div>
     </TooltipProvider>
+  )
+}
+
+const copyLink = async () => {
+  await navigator.clipboard.writeText(window.location.href)
+  toast.success("已複製會議連結")
+}
+
+// A phone has room for the main controls only (mic, camera, reactions, the
+// panel, leave); the rest sit in this menu. Wider screens never show it.
+function MoreMenu({
+  roomMic,
+  hand,
+  sharing,
+  onShare,
+}: {
+  roomMic: ReturnType<typeof useRoomMic>
+  hand: ReturnType<typeof useMyHand>
+  sharing: boolean
+  onShare: () => void
+}) {
+  const room = useRoomContext()
+  const captions = useCaptions()
+  const canShare =
+    typeof navigator !== "undefined" &&
+    typeof navigator.mediaDevices?.getDisplayMedia === "function"
+
+  // Front and back cameras: each tap moves to the next camera.
+  const nextCamera = async () => {
+    try {
+      const cameras = await Room.getLocalDevices("videoinput")
+      if (cameras.length < 2) {
+        toast("只有一個鏡頭")
+        return
+      }
+      const now = room.getActiveDevice("videoinput")
+      const at = cameras.findIndex((c) => c.deviceId === now)
+      await room.switchActiveDevice(
+        "videoinput",
+        cameras[(at + 1) % cameras.length].deviceId
+      )
+    } catch {
+      toast.error("切換鏡頭失敗")
+    }
+  }
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <Button
+            variant="outline"
+            size="icon"
+            aria-label="更多"
+            className="md:hidden"
+          />
+        }
+      >
+        <EllipsisIcon />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" side="top">
+        <DropdownMenuItem onClick={() => void nextCamera()}>
+          <SwitchCameraIcon />
+          切換鏡頭
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => void hand.set(!hand.up)}>
+          <HandIcon />
+          {hand.up ? "放下手" : "舉手"}
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={captions.toggle}>
+          {captions.on ? <CaptionsOffIcon /> : <CaptionsIcon />}
+          {captions.on ? "關閉字幕" : "字幕"}
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => void roomMic.set(!roomMic.on)}>
+          <UsersRoundIcon />
+          {roomMic.on ? "關閉會議室收音" : "會議室收音"}
+        </DropdownMenuItem>
+        {canShare && (
+          <DropdownMenuItem onClick={onShare}>
+            {sharing ? <MonitorXIcon /> : <MonitorUpIcon />}
+            {sharing ? "停止分享螢幕" : "分享螢幕"}
+          </DropdownMenuItem>
+        )}
+        <DropdownMenuItem onClick={() => void copyLink()}>
+          <LinkIcon />
+          複製會議連結
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 
