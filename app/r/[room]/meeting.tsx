@@ -60,6 +60,7 @@ import { cn } from "@/lib/utils"
 
 import { DeviceMenu } from "./device-menu"
 import type { MediaChoices } from "./lobby"
+import { ReactionListener, ReactionPicker, TileReactions } from "./reactions"
 
 // One meeting: everyone's camera (or their name when it is off), a shared
 // screen when there is one, and the member's own controls. Camera and
@@ -117,6 +118,7 @@ export function Meeting({
     >
       <RoomAudioRenderer />
       <SummaryListener onSummary={setSummary} />
+      <ReactionListener />
       <Shortcuts />
       <RestoreRoomMic />
       <Reconnecting />
@@ -271,6 +273,7 @@ function Tile({
         )}
         {!screen && <WeakSignal participant={participant} />}
       </div>
+      {!screen && <TileReactions identity={participant.identity} />}
       <Button
         variant="ghost"
         size="icon"
@@ -377,6 +380,7 @@ function Controls({
         >
           {isScreenShareEnabled ? <MonitorXIcon /> : <MonitorUpIcon />}
         </Control>
+        <ReactionPicker />
         <Divider />
         <Control
           label={
