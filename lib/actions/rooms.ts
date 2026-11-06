@@ -12,6 +12,8 @@ import {
   getRoom,
   joinToken,
   listRooms as listLiveKitRooms,
+  MODERATIONS,
+  moderate,
   openRoomCount,
   parseMetadata,
   stamp,
@@ -322,6 +324,8 @@ export type JoinState =
       token: string
       /** When a scheduled meeting ends; null for a room opened on the spot. */
       endsAt: Date | null
+      /** Whether this member opened the room and may moderate it. */
+      host?: boolean
     }
   | { state: "early"; title: string; opensAt: Date; startsAt: Date }
   | { state: "ended"; title: string }
@@ -410,10 +414,44 @@ export const joinRoom = defineAction({
       identity: me.id,
       name: me.name,
     })
-    return { state: "ready", title, endsAt, ...credentials }
+    const host = isHost(
+      me.username,
+      parseMetadata((room ?? (await getRoom(input.name)))?.metadata ?? "")
+    )
+    return { state: "ready", title, endsAt, host, ...credentials }
   },
   mcpExcludedBecause:
     "It mints a browser credential; an agent joins a room with its own LiveKit token, not a member's.",
+})
+
+/** The host is the member who opened the room (portal's booker for a
+ * scheduled one); an account without a username is nobody's host. */
+const isHost = (username: string | null, metadata: RoomMetadata) =>
+  Boolean(username) && metadata.opener === username
+
+export const moderateParticipant = defineAction({
+  name: "moderate_participant",
+  title: "主持人管理",
+  description:
+    "The room's host (the member who opened it) mutes another member's microphone, stops their camera, lowers their raised hand, or removes them from the room. identity is the member's LiveKit identity (their meet user id, from list_rooms participants). Anyone else gets an error.",
+  kind: "mutation",
+  input: z.object({
+    name: roomName,
+    identity: z.string().min(1).max(128),
+    action: z.enum(MODERATIONS),
+  }),
+  run: async (actor, input) => {
+    const [me, room] = await Promise.all([
+      member(actor.userId),
+      getRoom(input.name),
+    ])
+    if (!room) throw new Error("沒有這個會議室")
+    if (!isHost(me.username, parseMetadata(room.metadata)))
+      throw new Error("只有開會議室的人可以這樣做")
+    if (input.identity === me.id) throw new Error("不能對自己這樣做")
+    await moderate(input.name, input.identity, input.action)
+    return { done: true }
+  },
 })
 
 export const endRoom = defineAction({

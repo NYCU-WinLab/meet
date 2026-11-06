@@ -6,6 +6,7 @@ import {
   joinRoom,
   listGroups,
   listRooms,
+  moderateParticipant,
   scheduleRoom,
   updateScheduledRoom,
 } from "@/lib/actions/rooms"
@@ -31,6 +32,7 @@ export const actions: Action[] = [
   updateScheduledRoom,
   cancelScheduledRoom,
   joinRoom,
+  moderateParticipant,
   endRoom,
   dashboard,
   recordAiUsage,

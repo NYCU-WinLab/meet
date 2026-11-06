@@ -79,6 +79,7 @@ export default async function RoomPage({ params }: PageProps<"/r/[room]">) {
         serverUrl={joined.serverUrl}
         token={joined.token}
         endsAt={joined.endsAt}
+        host={joined.host ?? false}
       />
     </MeetShell>
   )

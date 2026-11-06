@@ -41,11 +41,14 @@ export function Room({
   serverUrl,
   token,
   endsAt,
+  host,
 }: {
   title: string
   serverUrl: string
   token: string
   endsAt: Date | null
+  /** Whether this member opened the room and may moderate it. */
+  host: boolean
 }) {
   const [joined, setJoined] = React.useState<MediaChoices | null>(null)
   if (joined)
@@ -54,6 +57,7 @@ export function Room({
         serverUrl={serverUrl}
         token={token}
         endsAt={endsAt}
+        host={host}
         choices={joined}
       />
     )

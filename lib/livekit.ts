@@ -5,7 +5,9 @@
 // webhook route call it.
 import {
   AccessToken,
+  DataPacket_Kind,
   LiveKitAPI,
+  TrackSource,
   WebhookReceiver,
   type WebhookEvent,
   EncodedFileOutput,
@@ -207,6 +209,55 @@ export async function activeRecordings() {
 /** Disconnects everyone and closes the room. */
 export async function deleteRoom(name: string) {
   await api().room.deleteRoom(name)
+}
+
+/** What the host may do to someone else in the room. */
+export const MODERATIONS = [
+  "mute_mic",
+  "stop_camera",
+  "lower_hand",
+  "remove",
+] as const
+export type Moderation = (typeof MODERATIONS)[number]
+
+/** Data topic that tells the member what the host did to them. */
+export const MODERATION_TOPIC = "meet.moderation"
+
+/**
+ * The host's action on one member, done with the server API because a
+ * member's own token cannot touch anyone else. Only real members can be
+ * targeted, never the hidden summary participant or egress. The member is
+ * told on a data topic, except when removed (their client sees why).
+ */
+export async function moderate(
+  room: string,
+  identity: string,
+  action: Moderation
+) {
+  const client = api().room
+  const target = await client.getParticipant(room, identity).catch(() => null)
+  if (!target || !isMember(target)) throw new Error("房間裡沒有這位成員")
+  if (action === "remove") {
+    await client.removeParticipant(room, identity)
+    return
+  }
+  if (action === "lower_hand") {
+    await client.updateParticipant(room, identity, {
+      attributes: { "meet.hand": "" },
+    })
+  } else {
+    const source =
+      action === "mute_mic" ? TrackSource.MICROPHONE : TrackSource.CAMERA
+    for (const track of target.tracks)
+      if (track.source === source && !track.muted)
+        await client.mutePublishedTrack(room, identity, track.sid, true)
+  }
+  await client.sendData(
+    room,
+    new TextEncoder().encode(action),
+    DataPacket_Kind.RELIABLE,
+    { destinationIdentities: [identity], topic: MODERATION_TOPIC }
+  )
 }
 
 /** The token one member joins one room with: good for an hour, lets them
