@@ -43,8 +43,10 @@ export function CaptionsProvider({ children }: { children: React.ReactNode }) {
   return <CaptionsContext value={value}>{children}</CaptionsContext>
 }
 
+export const useCaptions = () => React.useContext(CaptionsContext)
+
 export function CaptionsControl() {
-  const { on, toggle } = React.useContext(CaptionsContext)
+  const { on, toggle } = useCaptions()
   return (
     <Button
       variant={on ? "default" : "outline"}
