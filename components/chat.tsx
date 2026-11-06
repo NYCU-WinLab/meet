@@ -28,11 +28,14 @@ const RUN_MS = 5 * 60 * 1000
 export function Chat({
   visible,
   onUnread,
+  sound,
 }: {
-  /** False while another tab covers the chat. */
+  /** False while another tab covers the chat or the page is in the background. */
   visible: boolean
   /** Messages from others that arrived while the chat was not visible. */
   onUnread: (count: number) => void
+  /** Ring when someone mentions me while the chat is not visible. */
+  sound: boolean
 }) {
   const { chatMessages, send, isSending } = useChat()
   const { localParticipant } = useLocalParticipant()
@@ -65,6 +68,34 @@ export function Chat({
         .filter((m) => !senderOf(m, localParticipant.identity).mine).length
     )
   }, [visible, chatMessages, localParticipant.identity, onUnread])
+
+  // A mention of me, or the agent answering my question, reaches me even
+  // with the meeting in a background tab: a browser notification, and a
+  // chime when the chat is not on screen. History from before I joined
+  // stays quiet.
+  const handled = React.useRef<number | null>(null)
+  const askedAgent = React.useRef(false)
+  React.useEffect(() => {
+    if (handled.current === null) {
+      handled.current = chatMessages.length
+      return
+    }
+    const fresh = chatMessages.slice(handled.current)
+    handled.current = chatMessages.length
+    for (const message of fresh) {
+      const sender = senderOf(message, localParticipant.identity)
+      if (sender.mine) {
+        if (mentions(message.message, AGENT.name)) askedAgent.current = true
+        continue
+      }
+      const answer = sender.agent && askedAgent.current
+      if (answer) askedAgent.current = false
+      if (!answer && !mentions(message.message, myName)) continue
+      if (!visible && sound) chime()
+      if (document.visibilityState === "hidden")
+        notify(sender.agent ? "agent 回覆你" : `${sender.name} 提到你`, message)
+    }
+  }, [chatMessages, localParticipant.identity, myName, visible, sound])
 
   return (
     <section className="flex min-h-0 flex-1 basis-0 flex-col">
@@ -122,10 +153,58 @@ export function Chat({
       <Composer
         people={people.filter((p) => p.identity !== localParticipant.identity)}
         disabled={isSending}
-        onSend={send}
+        onSend={(text) => {
+          // Taking part in the chat is when to ask, not on join.
+          askNotificationPermission()
+          return send(text)
+        }}
       />
     </section>
   )
+}
+
+/** Opens the panel on the chat tab; the meeting listens for it. */
+export const OPEN_CHAT_EVENT = "meet:open-chat"
+
+function askNotificationPermission() {
+  if (typeof Notification === "undefined") return
+  if (Notification.permission === "default")
+    void Notification.requestPermission()
+}
+
+function notify(title: string, message: ReceivedChatMessage) {
+  if (typeof Notification === "undefined") return
+  if (Notification.permission !== "granted") return
+  const shown = new Notification(title, {
+    body: message.message.slice(0, 140),
+    tag: `meet-${message.id ?? message.timestamp}`,
+    icon: "/icon.png",
+  })
+  shown.onclick = () => {
+    window.focus()
+    window.dispatchEvent(new Event(OPEN_CHAT_EVENT))
+    shown.close()
+  }
+}
+
+// Two short notes, made on the spot so there is no sound file to load.
+let audio: AudioContext | null = null
+function chime() {
+  try {
+    audio ??= new AudioContext()
+    const now = audio.currentTime
+    for (const [i, frequency] of [880, 1320].entries()) {
+      const tone = audio.createOscillator()
+      const gain = audio.createGain()
+      tone.frequency.value = frequency
+      gain.gain.setValueAtTime(0.0001, now + i * 0.12)
+      gain.gain.exponentialRampToValueAtTime(0.15, now + i * 0.12 + 0.02)
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + i * 0.12 + 0.25)
+      tone.connect(gain).connect(audio.destination)
+      tone.start(now + i * 0.12)
+      tone.stop(now + i * 0.12 + 0.3)
+    }
+  } catch {}
 }
 
 type Sender = {

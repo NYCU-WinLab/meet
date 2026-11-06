@@ -23,6 +23,8 @@ import {
   type RoomOptions,
 } from "livekit-client"
 import {
+  BellIcon,
+  BellOffIcon,
   CircleCheckIcon,
   CircleDashedIcon,
   CircleDotIcon,
@@ -45,7 +47,7 @@ import * as React from "react"
 import { createPortal } from "react-dom"
 import { toast } from "sonner"
 
-import { Chat } from "@/components/chat"
+import { Chat, OPEN_CHAT_EVENT } from "@/components/chat"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
@@ -89,6 +91,11 @@ export function Meeting({
     summary?.agenda?.filter((item) => item.status === "pending").length ?? 0
   useAgendaReminder(endsAt, pending)
   const toggle = () => setOpen((was) => !was)
+  React.useEffect(() => {
+    const show = () => setOpen(true)
+    window.addEventListener(OPEN_CHAT_EVENT, show)
+    return () => window.removeEventListener(OPEN_CHAT_EVENT, show)
+  }, [])
   return (
     <LiveKitRoom
       serverUrl={serverUrl}
@@ -862,6 +869,36 @@ function MeetingPanel({
 
 type PanelTab = "summary" | "chat"
 const TAB_KEY = "meet.panel-tab."
+const SOUND_KEY = "meet.mention-sound"
+
+const subscribeVisibility = (onChange: () => void) => {
+  document.addEventListener("visibilitychange", onChange)
+  return () => document.removeEventListener("visibilitychange", onChange)
+}
+
+/** False while the meeting is in a background tab or a hidden window. */
+function usePageVisible() {
+  return React.useSyncExternalStore(
+    subscribeVisibility,
+    () => document.visibilityState === "visible",
+    () => true
+  )
+}
+
+/** "(3) 標題" in the browser tab while messages wait unread. */
+function useUnreadTitle(unread: number) {
+  const base = React.useRef<string | null>(null)
+  React.useEffect(() => {
+    base.current ??= document.title.replace(/^\(\d+\) /, "")
+    document.title = unread > 0 ? `(${unread}) ${base.current}` : base.current
+  }, [unread])
+  React.useEffect(
+    () => () => {
+      if (base.current) document.title = base.current
+    },
+    []
+  )
+}
 
 // The panel holds one thing at a time, so each gets its full height. Both
 // stay mounted: the chat keeps its messages and counts what arrives while
@@ -884,12 +921,35 @@ function PanelTabs({
     }
   })
   const [unread, setUnread] = React.useState(0)
-  const pick = (next: PanelTab) => {
-    setTab(next)
+  const pageVisible = usePageVisible()
+  const [sound, setSound] = React.useState(() => {
     try {
-      localStorage.setItem(key, next)
+      return localStorage.getItem(SOUND_KEY) !== "off"
+    } catch {
+      return true
+    }
+  })
+  const toggleSound = () => {
+    setSound(!sound)
+    try {
+      localStorage.setItem(SOUND_KEY, sound ? "off" : "on")
     } catch {}
   }
+  const pick = React.useCallback(
+    (next: PanelTab) => {
+      setTab(next)
+      try {
+        localStorage.setItem(key, next)
+      } catch {}
+    },
+    [key]
+  )
+  React.useEffect(() => {
+    const show = () => pick("chat")
+    window.addEventListener(OPEN_CHAT_EVENT, show)
+    return () => window.removeEventListener(OPEN_CHAT_EVENT, show)
+  }, [pick])
+  useUnreadTitle(unread)
   const current = summary?.agenda?.find((item) => item.status === "partial")
 
   return (
@@ -898,8 +958,8 @@ function PanelTabs({
       onValueChange={(next) => pick(next as PanelTab)}
       className="flex min-h-0 flex-1 flex-col gap-0"
     >
-      <div className="shrink-0 px-4 pt-4">
-        <TabsList className="w-full">
+      <div className="flex shrink-0 items-center gap-2 px-4 pt-4">
+        <TabsList className="flex-1">
           <TabsTrigger value="summary">摘要</TabsTrigger>
           <TabsTrigger value="chat">
             聊天
@@ -913,6 +973,24 @@ function PanelTabs({
             )}
           </TabsTrigger>
         </TabsList>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label={sound ? "關閉提及鈴聲" : "開啟提及鈴聲"}
+                aria-pressed={sound}
+                onClick={toggleSound}
+              />
+            }
+          >
+            {sound ? <BellIcon /> : <BellOffIcon />}
+          </TooltipTrigger>
+          <TooltipContent>
+            {sound ? "關閉提及鈴聲" : "開啟提及鈴聲"}
+          </TooltipContent>
+        </Tooltip>
       </div>
       <TabsContent
         value="summary"
@@ -936,7 +1014,11 @@ function PanelTabs({
             <span className="truncate">{current.text}</span>
           </button>
         )}
-        <Chat visible={open && tab === "chat"} onUnread={setUnread} />
+        <Chat
+          visible={open && tab === "chat" && pageVisible}
+          onUnread={setUnread}
+          sound={sound}
+        />
       </TabsContent>
     </Tabs>
   )
