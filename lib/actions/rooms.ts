@@ -53,8 +53,13 @@ const booking = z
   .regex(/^room-booking-(?:[0-9a-f]){12}$/, "預約編號格式不對")
 const when = z.coerce.date()
 
-async function checkGroup(name?: string) {
-  if (!name) return
+/**
+ * A member may only name a project group. A trusted service (portal) also
+ * files under GitLab groups that are not project groups, such as the
+ * Monday lab meeting's "lab-meeting", and checks them itself.
+ */
+async function checkGroup(actor: Actor, name?: string) {
+  if (!name || actor.service) return
   const groups = await projectGroups()
   if (!groups.some((g) => g.name === name)) throw new Error("沒有這個專案群組")
 }
@@ -155,7 +160,7 @@ export const createRoomAction = defineAction({
   }),
   run: async (actor, input) => {
     const me = await member(actor.userId)
-    await checkGroup(input.group)
+    await checkGroup(actor, input.group)
     if (!me.username) {
       // The helper files such a recording as unassigned.
       emitErrorLog(new Error("member has no username"), {
@@ -215,7 +220,7 @@ export const scheduleRoom = defineAction({
   }),
   run: async (actor, input) => {
     if (input.endsAt <= input.startsAt) throw new Error("結束要晚於開始")
-    await checkGroup(input.group)
+    await checkGroup(actor, input.group)
     const who = await openerOf(actor, input.opener)
     const name = newRoomName()
     await db.insert(scheduledRoom).values({
@@ -271,7 +276,7 @@ export const updateScheduledRoom = defineAction({
   run: async (actor, input) => {
     const row = await scheduledByBooking(input.booking)
     await mayChange(actor, row)
-    await checkGroup(input.group)
+    await checkGroup(actor, input.group)
     const startsAt = input.startsAt ?? row.startsAt
     const endsAt = input.endsAt ?? row.endsAt
     if (endsAt <= startsAt) throw new Error("結束要晚於開始")
