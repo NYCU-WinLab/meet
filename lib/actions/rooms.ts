@@ -54,12 +54,12 @@ const booking = z
 const when = z.coerce.date()
 
 /**
- * A member may only name a project group. A trusted service (portal) also
+ * A member or another service may only name a project group. portal also
  * files under GitLab groups that are not project groups, such as the
  * Monday lab meeting's "lab-meeting", and checks them itself.
  */
 async function checkGroup(actor: Actor, name?: string) {
-  if (!name || actor.service) return
+  if (!name || actor.service === "portal") return
   const groups = await projectGroups()
   if (!groups.some((g) => g.name === name)) throw new Error("沒有這個專案群組")
 }
