@@ -18,6 +18,43 @@ import { cn } from "@/lib/utils"
 
 const SAFE_URL = /^(https?:|mailto:|\/(?!\/)|#)/i
 
+// GFM links a bare URL up to the next space, but Chinese puts no space
+// after one: "https://x.tw/docs，謝謝" would link "，謝謝" too. A bare link
+// ends at the first full-width punctuation mark; the rest goes back to text.
+const CJK_STOP = /[，。、；：！？）」』】〉》…]/
+
+type MdNode = {
+  type: string
+  value?: string
+  url?: string
+  children?: MdNode[]
+}
+
+function trimCjkAutolinks() {
+  const walk = (node: MdNode) => {
+    const children = node.children
+    if (!children) return
+    for (let i = 0; i < children.length; i++) {
+      const child = children[i]
+      const text = child.children?.[0]
+      const bare =
+        child.type === "link" &&
+        child.children?.length === 1 &&
+        text?.type === "text" &&
+        (text.value === child.url || `http://${text.value}` === child.url)
+      const cut = bare ? (text!.value ?? "").search(CJK_STOP) : -1
+      if (bare && cut > 0) {
+        const kept = text!.value!.slice(0, cut)
+        const rest = text!.value!.slice(cut)
+        child.url = child.url!.slice(0, child.url!.length - rest.length)
+        text!.value = kept
+        children.splice(i + 1, 0, { type: "text", value: rest })
+      } else walk(child)
+    }
+  }
+  return (tree: MdNode) => walk(tree)
+}
+
 /** Drops any link whose scheme is not on the safe list. */
 function safeUrl(url: string) {
   const trimmed = url.trim()
@@ -161,7 +198,7 @@ function Markdown({
     [components, inline]
   )
   const plugins = React.useMemo(
-    () => [remarkGfm, ...(remarkPlugins ?? [])],
+    () => [remarkGfm, trimCjkAutolinks, ...(remarkPlugins ?? [])],
     [remarkPlugins]
   )
   const Root = inline ? "span" : "div"
