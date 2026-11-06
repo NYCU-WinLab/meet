@@ -9,14 +9,20 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-inter), var(--font-noto-sans-jp), var(--font-noto-sans-tc), sans-serif;
-  --font-mono: var(--font-jetbrains-mono), var(--font-noto-sans-jp), var(--font-noto-sans-tc), monospace;
+  --font-sans:
+    var(--font-inter), var(--font-noto-sans-jp), var(--font-noto-sans-tc),
+    sans-serif;
+  --font-mono:
+    var(--font-jetbrains-mono), var(--font-noto-sans-jp),
+    var(--font-noto-sans-tc), monospace;
   --text-*: initial;
   --text-title: 1.5rem;
   --text-title--line-height: 2rem;
   --text-body: 1rem;
   --text-body--line-height: 1.5rem;
-  --font-heading: var(--font-inter), var(--font-noto-sans-jp), var(--font-noto-sans-tc), sans-serif;
+  --font-heading:
+    var(--font-inter), var(--font-noto-sans-jp), var(--font-noto-sans-tc),
+    sans-serif;
   --color-success: var(--success);
   --color-warning: var(--warning);
   --radius-control: var(--radius);
@@ -97,29 +103,81 @@
 }
 
 @utility w-menu {
-    width: calc(var(--anchor-width) + 0.5rem);
+  width: calc(var(--anchor-width) + 0.5rem);
 }
 
 @utility duration-state {
-    --tw-duration: 150ms;
-    transition-duration: 150ms;
-    --tw-ease: cubic-bezier(0, 0, 0.2, 1);
-    transition-timing-function: cubic-bezier(0, 0, 0.2, 1);
+  --tw-duration: 150ms;
+  transition-duration: 150ms;
+  --tw-ease: cubic-bezier(0, 0, 0.2, 1);
+  transition-timing-function: cubic-bezier(0, 0, 0.2, 1);
 }
 
 @utility duration-overlay {
-    --tw-duration: 200ms;
-    transition-duration: 200ms;
-    --tw-ease: cubic-bezier(0, 0, 0.2, 1);
-    transition-timing-function: cubic-bezier(0, 0, 0.2, 1);
+  --tw-duration: 200ms;
+  transition-duration: 200ms;
+  --tw-ease: cubic-bezier(0, 0, 0.2, 1);
+  transition-timing-function: cubic-bezier(0, 0, 0.2, 1);
 }
 
 /* The page's one focus moves on a spring: 500ms, overshooting 10%. */
 @utility duration-spring {
   --tw-duration: 500ms;
   transition-duration: 500ms;
-  --tw-ease: linear(0, 0.04, 0.142, 0.278, 0.429, 0.578, 0.715, 0.833, 0.928, 1.001, 1.051, 1.083, 1.099, 1.103, 1.097, 1.086, 1.072, 1.056, 1.041, 1.027, 1.016, 1.006, 0.999, 0.994, 1);
-  transition-timing-function: linear(0, 0.04, 0.142, 0.278, 0.429, 0.578, 0.715, 0.833, 0.928, 1.001, 1.051, 1.083, 1.099, 1.103, 1.097, 1.086, 1.072, 1.056, 1.041, 1.027, 1.016, 1.006, 0.999, 0.994, 1);
+  --tw-ease: linear(
+    0,
+    0.04,
+    0.142,
+    0.278,
+    0.429,
+    0.578,
+    0.715,
+    0.833,
+    0.928,
+    1.001,
+    1.051,
+    1.083,
+    1.099,
+    1.103,
+    1.097,
+    1.086,
+    1.072,
+    1.056,
+    1.041,
+    1.027,
+    1.016,
+    1.006,
+    0.999,
+    0.994,
+    1
+  );
+  transition-timing-function: linear(
+    0,
+    0.04,
+    0.142,
+    0.278,
+    0.429,
+    0.578,
+    0.715,
+    0.833,
+    0.928,
+    1.001,
+    1.051,
+    1.083,
+    1.099,
+    1.103,
+    1.097,
+    1.086,
+    1.072,
+    1.056,
+    1.041,
+    1.027,
+    1.016,
+    1.006,
+    0.999,
+    0.994,
+    1
+  );
 }
 
 /* Arriving on the page: the focus rises on the spring, a list's rows
@@ -138,7 +196,35 @@
 }
 
 @utility animate-rise {
-  animation: rise 500ms linear(0, 0.04, 0.142, 0.278, 0.429, 0.578, 0.715, 0.833, 0.928, 1.001, 1.051, 1.083, 1.099, 1.103, 1.097, 1.086, 1.072, 1.056, 1.041, 1.027, 1.016, 1.006, 0.999, 0.994, 1) both;
+  animation: rise 500ms
+    linear(
+      0,
+      0.04,
+      0.142,
+      0.278,
+      0.429,
+      0.578,
+      0.715,
+      0.833,
+      0.928,
+      1.001,
+      1.051,
+      1.083,
+      1.099,
+      1.103,
+      1.097,
+      1.086,
+      1.072,
+      1.056,
+      1.041,
+      1.027,
+      1.016,
+      1.006,
+      0.999,
+      0.994,
+      1
+    )
+    both;
 }
 
 @utility stagger-rise {
@@ -173,7 +259,34 @@
 
 /* A number-ticker digit column; data-digit picks the row. */
 @utility digit-roll {
-  transition: translate 500ms linear(0, 0.04, 0.142, 0.278, 0.429, 0.578, 0.715, 0.833, 0.928, 1.001, 1.051, 1.083, 1.099, 1.103, 1.097, 1.086, 1.072, 1.056, 1.041, 1.027, 1.016, 1.006, 0.999, 0.994, 1);
+  transition: translate 500ms
+    linear(
+      0,
+      0.04,
+      0.142,
+      0.278,
+      0.429,
+      0.578,
+      0.715,
+      0.833,
+      0.928,
+      1.001,
+      1.051,
+      1.083,
+      1.099,
+      1.103,
+      1.097,
+      1.086,
+      1.072,
+      1.056,
+      1.041,
+      1.027,
+      1.016,
+      1.006,
+      0.999,
+      0.994,
+      1
+    );
   &[data-digit="1"] {
     translate: 0 -10%;
   }
@@ -203,7 +316,9 @@
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  *, ::before, ::after {
+  *,
+  ::before,
+  ::after {
     --tw-enter-scale: 1 !important;
     --tw-exit-scale: 1 !important;
     --tw-enter-translate-x: 0 !important;
@@ -211,10 +326,34 @@
     --tw-exit-translate-x: 0 !important;
     --tw-exit-translate-y: 0 !important;
   }
-  .animate-rise, .stagger-rise > * {
+  .animate-rise,
+  .stagger-rise > * {
     animation-name: appear;
   }
   .digit-roll {
     transition: none;
   }
+}
+/* A reaction floats up over its sender's tile and fades: 3s. */
+@keyframes float-away {
+  0% {
+    opacity: 0;
+    translate: 0 0;
+    scale: 0.6;
+  }
+  10% {
+    opacity: 1;
+    scale: 1;
+  }
+  70% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    translate: 0 -12rem;
+  }
+}
+
+@utility animate-float-away {
+  animation: float-away 3s cubic-bezier(0, 0, 0.2, 1) both;
 }
