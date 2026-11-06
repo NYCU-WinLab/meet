@@ -8,7 +8,9 @@ import {
 } from "@livekit/components-react"
 import { BotIcon, SendIcon } from "lucide-react"
 import * as React from "react"
+import remarkBreaks from "remark-breaks"
 
+import { Markdown } from "@/components/markdown"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
@@ -53,6 +55,10 @@ export function Chat({
     [participants]
   )
   const myName = localParticipant.name || localParticipant.identity
+  const mentionPlugins = React.useMemo(
+    () => [remarkBreaks, remarkMentions(people, myName)],
+    [people, myName]
+  )
 
   React.useEffect(() => {
     if (visible) bottom.current?.scrollIntoView({ block: "end" })
@@ -137,13 +143,9 @@ export function Chat({
                     </time>
                   </div>
                 )}
-                <p className="leading-7 break-words whitespace-pre-wrap">
-                  <RichText
-                    text={message.message}
-                    people={people}
-                    me={myName}
-                  />
-                </p>
+                <Markdown remarkPlugins={mentionPlugins} className="gap-2">
+                  {message.message}
+                </Markdown>
               </div>
             </li>
           )
@@ -291,66 +293,59 @@ function mentions(text: string, name: string) {
   return new RegExp(`@${escape(name)}(?![\\p{L}\\p{N}_])`, "u").test(text)
 }
 
-const URL_PATTERN = "https?:\\/\\/[^\\s<>\"'）」】]+"
+type MdNode = {
+  type: string
+  value?: string
+  children?: MdNode[]
+  data?: object
+}
 
-// Text with links and @mentions picked out. Links lose trailing punctuation
-// a sentence put after them; a mention matches a name in the room, longest
-// name first, so "@王小明" is not read as "@王小".
-function RichText({
-  text,
-  people,
-  me,
-}: {
-  text: string
-  people: Person[]
-  me: string
-}) {
+// @mentions inside the Markdown: a name in the room, longest name first, so
+// "@王小明" is not read as "@王小"; mine stands out more. Code and links
+// keep their text.
+function remarkMentions(people: Person[], me: string) {
   const names = [...new Set(people.map((p) => p.name))].sort(
     (a, b) => b.length - a.length
   )
-  const pattern = new RegExp(
+  const pattern =
     names.length > 0
-      ? `(${URL_PATTERN})|@(${names.map(escape).join("|")})(?![\\p{L}\\p{N}_])`
-      : `(${URL_PATTERN})`,
-    "gu"
-  )
-  const parts: React.ReactNode[] = []
-  let last = 0
-  for (const match of text.matchAll(pattern)) {
-    const at = match.index
-    if (at > last) parts.push(text.slice(last, at))
-    if (match[1]) {
-      const url = match[1].replace(/[.,;:!?。，；：！？)]+$/, "")
-      parts.push(
-        <a
-          key={at}
-          href={url}
-          target="_blank"
-          rel="noreferrer"
-          className="break-all text-primary underline underline-offset-4 hover:decoration-2"
-        >
-          {url}
-        </a>
-      )
-      last = at + url.length
-    } else {
-      const name = match[2]
-      parts.push(
-        <span
-          key={at}
-          className={cn(
-            "rounded-control px-1 font-medium text-primary",
-            name === me ? "bg-primary/25" : "bg-primary/15"
-          )}
-        >
-          @{name}
-        </span>
-      )
-      last = at + match[0].length
+      ? new RegExp(`@(${names.map(escape).join("|")})(?![\\p{L}\\p{N}_])`, "gu")
+      : null
+  const split = (value: string): MdNode[] => {
+    if (!pattern) return [{ type: "text", value }]
+    const out: MdNode[] = []
+    let last = 0
+    for (const match of value.matchAll(pattern)) {
+      if (match.index > last)
+        out.push({ type: "text", value: value.slice(last, match.index) })
+      out.push({
+        type: "mention",
+        children: [{ type: "text", value: match[0] }],
+        data: {
+          hName: "span",
+          hProperties: {
+            className: cn(
+              "rounded-control px-1 font-medium text-primary",
+              match[1] === me ? "bg-primary/25" : "bg-primary/15"
+            ),
+          },
+        },
+      })
+      last = match.index + match[0].length
     }
+    if (last < value.length)
+      out.push({ type: "text", value: value.slice(last) })
+    return out
   }
-  if (last < text.length) parts.push(text.slice(last))
-  return <>{parts}</>
+  const walk = (node: MdNode) => {
+    if (!node.children || node.type === "link") return
+    node.children = node.children.flatMap((child) => {
+      if (child.type === "text" && child.value) return split(child.value)
+      walk(child)
+      return [child]
+    })
+  }
+  return () => (tree: MdNode) => walk(tree)
 }
 
 // The message box. Typing @ lists the people to mention; arrows move, Enter
