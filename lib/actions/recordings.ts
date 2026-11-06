@@ -1,9 +1,15 @@
-import { and, asc, desc, eq, inArray, lte, or } from "drizzle-orm"
+import { and, asc, desc, eq, ilike, inArray, lte, or, sql } from "drizzle-orm"
 import { z } from "zod"
 
 import { defineAction, type Actor } from "@/lib/actions/define"
 import { db } from "@/lib/db"
-import { livekitEvent, recording, user } from "@/lib/db/schema"
+import {
+  livekitEvent,
+  recording,
+  transcriptIndex,
+  transcriptSegment,
+  user,
+} from "@/lib/db/schema"
 import { gitlabConfigured, recordUrl } from "@/lib/gitlab"
 import {
   folderFiles,
@@ -13,6 +19,7 @@ import {
 } from "@/lib/nextcloud"
 import { emitErrorLog } from "@/lib/otel"
 import { groupMembers } from "@/lib/portal"
+import { parseSrt } from "@/lib/srt"
 
 /** A stretch with no member in the room, in seconds. */
 export type Gap = { from: number; to: number }
@@ -320,6 +327,41 @@ async function mine(actor: Actor, recordingId: string) {
   return rec
 }
 
+/** The recordings this member may open, newest first: rooms they opened
+ * or booked, their project groups' rooms, and rooms they were in while the
+ * recording ran. */
+async function visibleRecordings(userId: string, name: string) {
+  const groups = await myGroups(name)
+  const joined = await db
+    .selectDistinct({ room: livekitEvent.room })
+    .from(livekitEvent)
+    .where(
+      and(
+        eq(livekitEvent.participant, userId),
+        inArray(livekitEvent.event, ["participant_joined", "participant_left"])
+      )
+    )
+  const rooms = joined.flatMap((r) => (r.room ? [r.room] : []))
+  const conditions = [
+    ...(name ? [eq(recording.opener, name)] : []),
+    ...(groups.length ? [inArray(recording.group, groups)] : []),
+    ...(rooms.length ? [inArray(recording.room, rooms)] : []),
+  ]
+  if (conditions.length === 0) return []
+  const rows = await db
+    .select()
+    .from(recording)
+    .where(or(...conditions))
+    .orderBy(desc(recording.startedAt))
+  const spans = await presence(userId, rooms)
+  return rows.filter(
+    (rec) =>
+      (name && rec.opener === name) ||
+      (rec.group && groups.includes(rec.group)) ||
+      attended(spans.get(rec.room), rec)
+  )
+}
+
 export const listMyRecordings = defineAction({
   name: "list_my_recordings",
   title: "我的會議紀錄",
@@ -328,50 +370,16 @@ export const listMyRecordings = defineAction({
   kind: "query",
   input: z.object({ limit: z.number().int().min(1).max(200).default(100) }),
   async run(actor, { limit }) {
-    const name = await username(actor)
-    const groups = await myGroups(name)
-    const joined = await db
-      .selectDistinct({ room: livekitEvent.room })
-      .from(livekitEvent)
-      .where(
-        and(
-          eq(livekitEvent.participant, actor.userId),
-          inArray(livekitEvent.event, [
-            "participant_joined",
-            "participant_left",
-          ])
-        )
-      )
-    const rooms = joined.flatMap((r) => (r.room ? [r.room] : []))
-    const conditions = [
-      ...(name ? [eq(recording.opener, name)] : []),
-      ...(groups.length ? [inArray(recording.group, groups)] : []),
-      ...(rooms.length ? [inArray(recording.room, rooms)] : []),
-    ]
-    if (conditions.length === 0) return { recordings: [] }
-    const rows = await db
-      .select()
-      .from(recording)
-      .where(or(...conditions))
-      .orderBy(desc(recording.startedAt))
-    const spans = await presence(actor.userId, rooms)
-    const recordings = rows
-      .filter(
-        (rec) =>
-          (name && rec.opener === name) ||
-          (rec.group && groups.includes(rec.group)) ||
-          attended(spans.get(rec.room), rec)
-      )
-      .slice(0, limit)
-      .map((rec) => ({
-        id: rec.id,
-        title: rec.title,
-        group: rec.group,
-        opener: rec.opener,
-        startedAt: rec.startedAt,
-        endedAt: rec.endedAt,
-        bytes: rec.bytes,
-      }))
+    const rows = await visibleRecordings(actor.userId, await username(actor))
+    const recordings = rows.slice(0, limit).map((rec) => ({
+      id: rec.id,
+      title: rec.title,
+      group: rec.group,
+      opener: rec.opener,
+      startedAt: rec.startedAt,
+      endedAt: rec.endedAt,
+      bytes: rec.bytes,
+    }))
     return { recordings }
   },
 })
@@ -467,5 +475,174 @@ export const recordingFile = defineAction({
     const response = await openFile(`${rec.folder}/${file}`, range)
     if (!response) throw new Error("找不到這個檔案")
     return response
+  },
+})
+
+// ---- Search across meetings -----------------------------------------------
+//
+// Subtitles are read into transcript_segments the first time a search
+// covers the recording, a few recordings per search so one search stays
+// fast; a recording not transcribed yet (or Nextcloud failing) waits 10
+// minutes before it is tried again, so it never holds older recordings back,
+// and is given up (indexed with 0 lines) 2 days after it ended.
+
+const INDEX_PER_SEARCH = 8
+const GIVE_UP_MS = 2 * 24 * 60 * 60 * 1000
+const RETRY_MS = 10 * 60 * 1000
+/** Recording id → when it may be tried again (this process only). */
+const notBefore = new Map<string, number>()
+
+async function indexTranscripts(recs: Recording[]) {
+  if (!nextcloudConfigured() || recs.length === 0) return
+  const done = new Set(
+    (
+      await db
+        .select({ id: transcriptIndex.recordingId })
+        .from(transcriptIndex)
+        .where(
+          inArray(
+            transcriptIndex.recordingId,
+            recs.map((r) => r.id)
+          )
+        )
+    ).map((r) => r.id)
+  )
+  const now = Date.now()
+  const todo = recs
+    .filter((r) => !done.has(r.id) && (notBefore.get(r.id) ?? 0) <= now)
+    .slice(0, INDEX_PER_SEARCH)
+  const later = (id: string) => notBefore.set(id, Date.now() + RETRY_MS)
+  await Promise.all(
+    todo.map(async (rec) => {
+      const source = await readText(
+        `${rec.folder}/${rec.stem}.srt`,
+        5_000_000
+      ).catch((error) => {
+        emitErrorLog(error, { source: "nextcloud srt" })
+        return undefined
+      })
+      if (source === undefined) return later(rec.id)
+      if (source === null && Date.now() - rec.endedAt.getTime() < GIVE_UP_MS)
+        return later(rec.id)
+      notBefore.delete(rec.id)
+      const cues = source ? parseSrt(source) : []
+      // One search indexes a recording at a time: the lock is held to the
+      // end of the transaction, and a second search finds it done.
+      await db.transaction(async (tx) => {
+        await tx.execute(
+          sql`select pg_advisory_xact_lock(hashtext(${`transcript:${rec.id}`}))`
+        )
+        const [already] = await tx
+          .select({ id: transcriptIndex.recordingId })
+          .from(transcriptIndex)
+          .where(eq(transcriptIndex.recordingId, rec.id))
+        if (already) return
+        await tx
+          .delete(transcriptSegment)
+          .where(eq(transcriptSegment.recordingId, rec.id))
+        for (let i = 0; i < cues.length; i += 500)
+          await tx
+            .insert(transcriptSegment)
+            .values(
+              cues
+                .slice(i, i + 500)
+                .map((cue) => ({ recordingId: rec.id, ...cue }))
+            )
+        await tx
+          .insert(transcriptIndex)
+          .values({ recordingId: rec.id, segments: cues.length })
+          .onConflictDoNothing()
+      })
+    })
+  )
+}
+
+const likePattern = (query: string) =>
+  `%${query.replace(/[\\%_]/g, (c) => `\\${c}`)}%`
+
+/** The recordings a search covers. A member searches their own. The
+ * summary service answers @agent in a chat everyone in the room reads, so it
+ * names everyone there and searches only what all of them may open. */
+async function searchable(actor: Actor, asUsers?: string[]) {
+  if (!actor.service) {
+    if (asUsers) throw new Error("只給摘要服務用")
+    return visibleRecordings(actor.userId, await username(actor))
+  }
+  if (actor.service !== "summary" || !asUsers?.length)
+    throw new Error("只給成員或摘要服務用")
+  const ids = [...new Set(asUsers)]
+  // A test participant or a guest has an identity that is not a user id.
+  const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+  if (!ids.every((id) => UUID.test(id))) return []
+  const rows = await db
+    .select({ id: user.id, username: user.username })
+    .from(user)
+    .where(inArray(user.id, ids))
+  // Someone in the room who is not a member: nothing is safe to show.
+  if (rows.length !== ids.length) return []
+  const each = await Promise.all(
+    rows.map((row) => visibleRecordings(row.id, row.username ?? ""))
+  )
+  const shared = each
+    .slice(1)
+    .reduce(
+      (keep, recs) =>
+        new Set(recs.filter((r) => keep.has(r.id)).map((r) => r.id)),
+      new Set(each[0].map((r) => r.id))
+    )
+  return each[0].filter((r) => shared.has(r.id))
+}
+
+export const searchRecordings = defineAction({
+  name: "search_recordings",
+  title: "搜尋會議紀錄",
+  description:
+    "Finds what was said in the member's past meetings: lines of the recordings' transcripts (and titles) that contain the query, newest meeting first. Each hit has the recording id and title, when the meeting started, the second the line starts at, the line, and a url that opens the recording at that second. Only recordings the member may open are searched.",
+  kind: "query",
+  input: z.object({
+    query: z.string().trim().min(1).max(100),
+    limit: z.number().int().min(1).max(50).default(20),
+    /** For the summary service only: everyone in the room. */
+    asUsers: z.array(z.string().min(1).max(100)).min(1).max(50).optional(),
+  }),
+  async run(actor, { query, limit, asUsers }) {
+    const recs = await searchable(actor, asUsers)
+    if (recs.length === 0) return { hits: [] }
+    await indexTranscripts(recs)
+    const byId = new Map(recs.map((r) => [r.id, r]))
+    const pattern = likePattern(query)
+    const lines = await db
+      .select({
+        recordingId: transcriptSegment.recordingId,
+        startMs: transcriptSegment.startMs,
+        text: transcriptSegment.text,
+      })
+      .from(transcriptSegment)
+      .innerJoin(recording, eq(recording.id, transcriptSegment.recordingId))
+      .where(
+        and(
+          inArray(transcriptSegment.recordingId, [...byId.keys()]),
+          ilike(transcriptSegment.text, pattern)
+        )
+      )
+      .orderBy(desc(recording.startedAt), asc(transcriptSegment.startMs))
+      .limit(limit)
+    const lower = query.toLowerCase()
+    const titled = recs
+      .filter((r) => r.title.toLowerCase().includes(lower))
+      .map((r) => ({ recordingId: r.id, startMs: 0, text: r.title }))
+    const hits = [...titled, ...lines].slice(0, limit).map((hit) => {
+      const rec = byId.get(hit.recordingId)!
+      const second = Math.floor(hit.startMs / 1000)
+      return {
+        recordingId: rec.id,
+        title: rec.title,
+        startedAt: rec.startedAt,
+        second,
+        text: hit.text,
+        url: `/recordings/${encodeURIComponent(rec.id)}?t=${second}`,
+      }
+    })
+    return { hits }
   },
 })

@@ -18,6 +18,7 @@ import {
   listMyRecordings,
   recordingFile,
   recordingGaps,
+  searchRecordings,
 } from "@/lib/actions/recordings"
 import { memberAvatar, whoami } from "@/lib/actions/users"
 
@@ -40,5 +41,6 @@ export const actions: Action[] = [
   fileRecording,
   listMyRecordings,
   getRecording,
+  searchRecordings,
   recordingFile,
 ]

@@ -1,7 +1,15 @@
 // A recording the egress uploader filed in Nextcloud: where its folder is
 // and whose meeting it was. Who may open it is worked out from this row,
 // the room's join events and the project group's members.
-import { bigint, index, pgTable, text, timestamp } from "drizzle-orm/pg-core"
+import {
+  bigint,
+  index,
+  integer,
+  pgTable,
+  serial,
+  text,
+  timestamp,
+} from "drizzle-orm/pg-core"
 
 export const recording = pgTable(
   "recordings",
@@ -31,3 +39,31 @@ export const recording = pgTable(
     index("recordings_started_at_idx").on(table.startedAt),
   ]
 )
+
+// The recording's subtitles, line by line, so search_recordings can find
+// what was said across meetings. Filled from <stem>.srt the first time a
+// search covers the recording; a row in transcriptIndex says it was read.
+export const transcriptSegment = pgTable(
+  "transcript_segments",
+  {
+    id: serial().primaryKey(),
+    recordingId: text()
+      .notNull()
+      .references(() => recording.id, { onDelete: "cascade" }),
+    startMs: integer().notNull(),
+    endMs: integer().notNull(),
+    text: text().notNull(),
+  },
+  (table) => [index("transcript_segments_recording_idx").on(table.recordingId)]
+)
+
+/** One row per recording whose subtitles were read (segments may be 0). */
+export const transcriptIndex = pgTable("transcript_index", {
+  recordingId: text()
+    .primaryKey()
+    .references(() => recording.id, { onDelete: "cascade" }),
+  segments: integer().notNull(),
+  indexedAt: timestamp({ withTimezone: true, mode: "date" })
+    .notNull()
+    .defaultNow(),
+})

@@ -353,7 +353,11 @@ async function ask(meeting: Meeting, who: string, said: string) {
       meeting.lines,
       who,
       question,
-      meeting.name
+      meeting.name,
+      // Everyone who reads the answer, read when it is asked.
+      [...meeting.room.remoteParticipants.values()]
+        .filter((p) => p.kind === ParticipantKind.STANDARD)
+        .map((p) => p.identity)
     )
     await reply(text)
     meeting.lines.push({ at: Date.now(), who: "agent（聊天）", text })
