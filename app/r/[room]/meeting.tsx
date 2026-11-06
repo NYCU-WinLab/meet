@@ -26,6 +26,7 @@ import {
   BellIcon,
   BellOffIcon,
   CircleCheckIcon,
+  HandIcon,
   CircleDashedIcon,
   CircleDotIcon,
   LinkIcon,
@@ -61,6 +62,12 @@ import { cn } from "@/lib/utils"
 import { DeviceMenu } from "./device-menu"
 import type { MediaChoices } from "./lobby"
 import { ReactionListener, ReactionPicker, TileReactions } from "./reactions"
+import {
+  LowerHandWhenSpeaking,
+  TileHand,
+  useHandQueue,
+  useMyHand,
+} from "./raise-hand"
 
 // One meeting: everyone's camera (or their name when it is off), a shared
 // screen when there is one, and the member's own controls. Camera and
@@ -119,6 +126,7 @@ export function Meeting({
       <RoomAudioRenderer />
       <SummaryListener onSummary={setSummary} />
       <ReactionListener />
+      <LowerHandWhenSpeaking />
       <Shortcuts />
       <RestoreRoomMic />
       <Reconnecting />
@@ -240,6 +248,7 @@ function Tile({
     trackRef.publication.track !== undefined &&
     !trackRef.publication.isMuted
   const name = participant.name || participant.identity
+  const queue = useHandQueue()
 
   return (
     <div
@@ -274,6 +283,7 @@ function Tile({
         {!screen && <WeakSignal participant={participant} />}
       </div>
       {!screen && <TileReactions identity={participant.identity} />}
+      {!screen && <TileHand identity={participant.identity} queue={queue} />}
       <Button
         variant="ghost"
         size="icon"
@@ -321,6 +331,7 @@ function Controls({
   const mic = useTrackToggle({ source: Track.Source.Microphone })
   const camera = useTrackToggle({ source: Track.Source.Camera })
   const roomMic = useRoomMic()
+  const hand = useMyHand()
   const wasSharing = React.useRef(false)
   const screen = useTrackToggle({
     source: Track.Source.ScreenShare,
@@ -381,6 +392,13 @@ function Controls({
           {isScreenShareEnabled ? <MonitorXIcon /> : <MonitorUpIcon />}
         </Control>
         <ReactionPicker />
+        <Control
+          label={hand.up ? "放下手" : "舉手"}
+          active={!hand.up}
+          onClick={() => void hand.set(!hand.up)}
+        >
+          <HandIcon />
+        </Control>
         <Divider />
         <Control
           label={
