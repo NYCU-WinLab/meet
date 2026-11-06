@@ -258,6 +258,7 @@ async function listen(
           participant.attributes[ROOM_MIC_ATTRIBUTE] === "1" ? ROOM : who
         meeting.lines.push({ at, who: said, text })
         log(meeting.name, who, "heard", text.length, "chars")
+        void caption(meeting, participant.identity, said, text, at)
       })
       .catch((error) => log(meeting.name, who, "transcribe failed", error))
   }
@@ -279,6 +280,28 @@ async function listen(
   clearInterval(timer)
   flush()
   log(meeting.name, who, "stopped", publication.sid)
+}
+
+// Live captions: each transcribed chunk goes to the room as soon as it
+// comes back, with when the chunk started so pages can show the delay.
+const CAPTION_TOPIC = "meet.caption"
+
+async function caption(
+  meeting: Meeting,
+  identity: string,
+  who: string,
+  text: string,
+  at: number
+) {
+  try {
+    await meeting.room.localParticipant?.sendText(
+      JSON.stringify({ identity, who, text, at }),
+      { topic: CAPTION_TOPIC }
+    )
+    log(meeting.name, "caption delay", Date.now() - at, "ms")
+  } catch (error) {
+    log(meeting.name, "caption send failed", error)
+  }
 }
 
 // Rewrites the summary with the oldest lines it has not seen, at most one

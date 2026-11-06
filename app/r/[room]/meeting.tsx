@@ -61,6 +61,7 @@ import {
 } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 
+import { Captions, CaptionsControl, CaptionsProvider } from "./captions"
 import { DeviceMenu } from "./device-menu"
 import { HostProvider, ModerationListener, TileModeration } from "./host"
 import type { MediaChoices } from "./lobby"
@@ -113,55 +114,58 @@ export function Meeting({
   }, [])
   return (
     <HostProvider value={host}>
-      <LiveKitRoom
-        serverUrl={serverUrl}
-        token={token}
-        connect
-        options={ROOM_OPTIONS}
-        audio={
-          choices.audio
-            ? { deviceId: choices.audioDeviceId || undefined }
-            : false
-        }
-        video={
-          choices.video
-            ? { deviceId: choices.videoDeviceId || undefined }
-            : false
-        }
-        onDisconnected={(reason) => {
-          if (reason === DisconnectReason.PARTICIPANT_REMOVED)
-            toast("主持人已請你離開會議")
-          router.push("/")
-        }}
-        onError={(error) => toast.error(error.message)}
-        onMediaDeviceFailure={(failure) => {
-          if (failure) toast.error("開不了鏡頭或麥克風，請檢查瀏覽器權限")
-        }}
-        className="fixed top-18 right-6 bottom-6 left-6 flex flex-col gap-6 md:top-22 md:flex-row md:gap-0"
-      >
-        <RoomAudioRenderer />
-        <SummaryListener onSummary={setSummary} />
-        <ModerationListener />
-        <ReactionListener />
-        <LowerHandWhenSpeaking />
-        <Shortcuts />
-        <RestoreRoomMic />
-        <Reconnecting />
-        {/* A phone shows the open panel instead of the stage; wider screens show both. */}
-        <div
-          className={cn(
-            "min-h-0 min-w-0 flex-1 flex-col",
-            open ? "hidden md:flex" : "flex"
-          )}
+      <CaptionsProvider>
+        <LiveKitRoom
+          serverUrl={serverUrl}
+          token={token}
+          connect
+          options={ROOM_OPTIONS}
+          audio={
+            choices.audio
+              ? { deviceId: choices.audioDeviceId || undefined }
+              : false
+          }
+          video={
+            choices.video
+              ? { deviceId: choices.videoDeviceId || undefined }
+              : false
+          }
+          onDisconnected={(reason) => {
+            if (reason === DisconnectReason.PARTICIPANT_REMOVED)
+              toast("主持人已請你離開會議")
+            router.push("/")
+          }}
+          onError={(error) => toast.error(error.message)}
+          onMediaDeviceFailure={(failure) => {
+            if (failure) toast.error("開不了鏡頭或麥克風，請檢查瀏覽器權限")
+          }}
+          className="fixed top-18 right-6 bottom-6 left-6 flex flex-col gap-6 md:top-22 md:flex-row md:gap-0"
         >
-          <Stage />
-        </div>
-        <MeetingPanel open={open} summary={summary} />
-        <div className="flex justify-center md:hidden">
-          <Controls open={open} onToggle={toggle} pending={pending} />
-        </div>
-        <ControlsInCorner open={open} onToggle={toggle} pending={pending} />
-      </LiveKitRoom>
+          <RoomAudioRenderer />
+          <SummaryListener onSummary={setSummary} />
+          <ModerationListener />
+          <ReactionListener />
+          <LowerHandWhenSpeaking />
+          <Shortcuts />
+          <RestoreRoomMic />
+          <Reconnecting />
+          {/* A phone shows the open panel instead of the stage; wider screens show both. */}
+          <div
+            className={cn(
+              "relative min-h-0 min-w-0 flex-1 flex-col",
+              open ? "hidden md:flex" : "flex"
+            )}
+          >
+            <Stage />
+            <Captions />
+          </div>
+          <MeetingPanel open={open} summary={summary} />
+          <div className="flex justify-center md:hidden">
+            <Controls open={open} onToggle={toggle} pending={pending} />
+          </div>
+          <ControlsInCorner open={open} onToggle={toggle} pending={pending} />
+        </LiveKitRoom>
+      </CaptionsProvider>
     </HostProvider>
   )
 }
@@ -411,6 +415,7 @@ function Controls({
           {isScreenShareEnabled ? <MonitorXIcon /> : <MonitorUpIcon />}
         </Control>
         <ReactionPicker />
+        <CaptionsControl />
         <Control
           label={hand.up ? "放下手" : "舉手"}
           active={!hand.up}
