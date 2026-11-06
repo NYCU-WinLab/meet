@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, ilike, inArray, lte, or } from "drizzle-orm"
+import { and, asc, desc, eq, ilike, inArray, lte, or, sql } from "drizzle-orm"
 import { z } from "zod"
 
 import { defineAction, type Actor } from "@/lib/actions/define"
@@ -482,11 +482,15 @@ export const recordingFile = defineAction({
 //
 // Subtitles are read into transcript_segments the first time a search
 // covers the recording, a few recordings per search so one search stays
-// fast; a recording not transcribed yet is tried again next time, and given
-// up (indexed with 0 lines) 2 days after it ended.
+// fast; a recording not transcribed yet (or Nextcloud failing) waits 10
+// minutes before it is tried again, so it never holds older recordings back,
+// and is given up (indexed with 0 lines) 2 days after it ended.
 
 const INDEX_PER_SEARCH = 8
 const GIVE_UP_MS = 2 * 24 * 60 * 60 * 1000
+const RETRY_MS = 10 * 60 * 1000
+/** Recording id → when it may be tried again (this process only). */
+const notBefore = new Map<string, number>()
 
 async function indexTranscripts(recs: Recording[]) {
   if (!nextcloudConfigured() || recs.length === 0) return
@@ -503,7 +507,11 @@ async function indexTranscripts(recs: Recording[]) {
         )
     ).map((r) => r.id)
   )
-  const todo = recs.filter((r) => !done.has(r.id)).slice(0, INDEX_PER_SEARCH)
+  const now = Date.now()
+  const todo = recs
+    .filter((r) => !done.has(r.id) && (notBefore.get(r.id) ?? 0) <= now)
+    .slice(0, INDEX_PER_SEARCH)
+  const later = (id: string) => notBefore.set(id, Date.now() + RETRY_MS)
   await Promise.all(
     todo.map(async (rec) => {
       const source = await readText(
@@ -513,11 +521,22 @@ async function indexTranscripts(recs: Recording[]) {
         emitErrorLog(error, { source: "nextcloud srt" })
         return undefined
       })
-      if (source === undefined) return
+      if (source === undefined) return later(rec.id)
       if (source === null && Date.now() - rec.endedAt.getTime() < GIVE_UP_MS)
-        return
+        return later(rec.id)
+      notBefore.delete(rec.id)
       const cues = source ? parseSrt(source) : []
+      // One search indexes a recording at a time: the lock is held to the
+      // end of the transaction, and a second search finds it done.
       await db.transaction(async (tx) => {
+        await tx.execute(
+          sql`select pg_advisory_xact_lock(hashtext(${`transcript:${rec.id}`}))`
+        )
+        const [already] = await tx
+          .select({ id: transcriptIndex.recordingId })
+          .from(transcriptIndex)
+          .where(eq(transcriptIndex.recordingId, rec.id))
+        if (already) return
         await tx
           .delete(transcriptSegment)
           .where(eq(transcriptSegment.recordingId, rec.id))
@@ -541,21 +560,34 @@ async function indexTranscripts(recs: Recording[]) {
 const likePattern = (query: string) =>
   `%${query.replace(/[\\%_]/g, (c) => `\\${c}`)}%`
 
-/** The member a search is for: the caller, or, for the summary service
- * answering an @agent question, the member who asked. */
-async function searcher(actor: Actor, asUser?: string) {
-  if (actor.service) {
-    if (actor.service !== "summary" || !asUser)
-      throw new Error("只給成員或摘要服務用")
-    const [row] = await db
-      .select({ username: user.username })
-      .from(user)
-      .where(eq(user.id, asUser))
-    if (!row) throw new Error("找不到這個成員")
-    return { userId: asUser, name: row.username ?? "" }
+/** The recordings a search covers. A member searches their own. The
+ * summary service answers @agent in a chat everyone in the room reads, so it
+ * names everyone there and searches only what all of them may open. */
+async function searchable(actor: Actor, asUsers?: string[]) {
+  if (!actor.service) {
+    if (asUsers) throw new Error("只給摘要服務用")
+    return visibleRecordings(actor.userId, await username(actor))
   }
-  if (asUser) throw new Error("只給摘要服務用")
-  return { userId: actor.userId, name: await username(actor) }
+  if (actor.service !== "summary" || !asUsers?.length)
+    throw new Error("只給成員或摘要服務用")
+  const ids = [...new Set(asUsers)]
+  const rows = await db
+    .select({ id: user.id, username: user.username })
+    .from(user)
+    .where(inArray(user.id, ids))
+  // Someone in the room who is not a member: nothing is safe to show.
+  if (rows.length !== ids.length) return []
+  const each = await Promise.all(
+    rows.map((row) => visibleRecordings(row.id, row.username ?? ""))
+  )
+  const shared = each
+    .slice(1)
+    .reduce(
+      (keep, recs) =>
+        new Set(recs.filter((r) => keep.has(r.id)).map((r) => r.id)),
+      new Set(each[0].map((r) => r.id))
+    )
+  return each[0].filter((r) => shared.has(r.id))
 }
 
 export const searchRecordings = defineAction({
@@ -567,12 +599,11 @@ export const searchRecordings = defineAction({
   input: z.object({
     query: z.string().trim().min(1).max(100),
     limit: z.number().int().min(1).max(50).default(20),
-    /** For the summary service only: the member who asked. */
-    asUser: z.string().min(1).max(100).optional(),
+    /** For the summary service only: everyone in the room. */
+    asUsers: z.array(z.string().min(1).max(100)).min(1).max(50).optional(),
   }),
-  async run(actor, { query, limit, asUser }) {
-    const who = await searcher(actor, asUser)
-    const recs = await visibleRecordings(who.userId, who.name)
+  async run(actor, { query, limit, asUsers }) {
+    const recs = await searchable(actor, asUsers)
     if (recs.length === 0) return { hits: [] }
     await indexTranscripts(recs)
     const byId = new Map(recs.map((r) => [r.id, r]))

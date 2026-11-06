@@ -15,14 +15,14 @@ const meetUrl = process.env.MEET_URL ?? "https://meet.winlab.tw"
 const serviceKey = process.env.MEET_SERVICE_KEY ?? ""
 
 // Web search for what the meeting cannot answer, and search_meetings for
-// what was said in the asker's past meetings (meet's search_recordings,
-// run as the asker so they only see meetings they may open).
+// what was said in past meetings (meet's search_recordings, limited to
+// meetings everyone in the room may open, since they all read the answer).
 const tools = [
   { type: "web_search_20250305", name: "web_search", max_uses: 3 },
   {
     name: "search_meetings",
     description:
-      "Search the asker's past meeting transcripts for a word or phrase. Returns matching lines with the meeting title, date and a link to the recording at that moment.",
+      "Search past meeting transcripts that everyone in this room may open, for a word or phrase. Returns matching lines with the meeting title, date and a link to the recording at that moment.",
     input_schema: {
       type: "object",
       properties: {
@@ -45,15 +45,18 @@ type Hit = {
   url: string
 }
 
-async function searchMeetings(query: string, asUser: string): Promise<Hit[]> {
-  if (!serviceKey || !asUser) return []
+async function searchMeetings(
+  query: string,
+  asUsers: string[]
+): Promise<Hit[]> {
+  if (!serviceKey || asUsers.length === 0) return []
   const response = await fetch(`${meetUrl}/api/actions/search_recordings`, {
     method: "POST",
     headers: {
       authorization: `Bearer ${serviceKey}`,
       "content-type": "application/json",
     },
-    body: JSON.stringify({ query, limit: 10, asUser }),
+    body: JSON.stringify({ query, limit: 10, asUsers }),
     signal: AbortSignal.timeout(20_000),
   })
   if (!response.ok) throw new Error(`search_recordings ${response.status}`)
@@ -317,8 +320,9 @@ export async function answer(
   who: string,
   question: string,
   room: string,
-  /** The asker's meet user id, for search_meetings. */
-  askerId: string
+  /** The meet user ids of everyone in the room: search_meetings finds only
+   * meetings all of them may open, since the whole room reads the answer. */
+  members: string[]
 ): Promise<string> {
   const recent = [...lines].sort((a, b) => a.at - b.at).slice(-QUESTION_LINES)
   const messages: { role: "user" | "assistant"; content: unknown }[] = [
@@ -346,7 +350,7 @@ export async function answer(
           .map(async (part) => {
             const hits = await searchMeetings(
               String(part.input?.query ?? "").slice(0, 100),
-              askerId
+              members
             ).catch((error) => {
               console.log(new Date().toISOString(), "search failed", error)
               return null
