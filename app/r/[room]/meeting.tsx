@@ -49,6 +49,7 @@ import { createPortal } from "react-dom"
 import { toast } from "sonner"
 
 import { Chat, OPEN_CHAT_EVENT } from "@/components/chat"
+import { Markdown } from "@/components/markdown"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
@@ -1060,7 +1061,7 @@ function SummaryPanel({ summary }: { summary: Summary | null }) {
         <p className="text-muted-foreground">開始說話後約 1 分鐘出現摘要</p>
       ) : (
         <>
-          <p className="break-words whitespace-pre-wrap">{summary.summary}</p>
+          <Markdown>{summary.summary}</Markdown>
           <SummaryList title="問題" items={summary.questions} />
           <SummaryList title="改進" items={summary.improvements} />
           <SummaryList title="決議" items={summary.decisions} />
@@ -1110,12 +1111,12 @@ function AgendaList({ items }: { items: AgendaItem[] }) {
                   {item.text}
                 </a>
               ) : (
-                <span className="break-words">{item.text}</span>
+                <Markdown inline>{item.text}</Markdown>
               )}
               {item.note && (
-                <span className="break-words text-muted-foreground">
+                <Markdown inline className="text-muted-foreground">
                   {item.note}
-                </span>
+                </Markdown>
               )}
             </div>
           </li>
@@ -1133,7 +1134,7 @@ function SummaryList({ title, items }: { title: string; items: string[] }) {
       <ul className="flex list-disc flex-col gap-2 pl-5 marker:text-muted-foreground">
         {items.map((item) => (
           <li key={item} className="break-words">
-            {item}
+            <Markdown inline>{item}</Markdown>
           </li>
         ))}
       </ul>
