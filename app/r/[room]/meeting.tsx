@@ -55,6 +55,7 @@ import {
 } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 
+import { DeviceMenu } from "./device-menu"
 import type { MediaChoices } from "./lobby"
 
 // One meeting: everyone's camera (or their name when it is off), a shared
@@ -331,22 +332,28 @@ function Controls({
       <div className="flex items-center gap-3">
         <RecordingState />
         <Divider />
-        <Control
-          label={`${isMicrophoneEnabled ? "關麥克風" : "開麥克風"}（${MOD}D）`}
-          active={isMicrophoneEnabled}
-          pending={mic.pending}
-          onClick={() => mic.toggle()}
-        >
-          {isMicrophoneEnabled ? <MicIcon /> : <MicOffIcon />}
-        </Control>
-        <Control
-          label={`${isCameraEnabled ? "關鏡頭" : "開鏡頭"}（${MOD}E）`}
-          active={isCameraEnabled}
-          pending={camera.pending}
-          onClick={() => camera.toggle()}
-        >
-          {isCameraEnabled ? <VideoIcon /> : <VideoOffIcon />}
-        </Control>
+        <div className="flex items-center gap-1">
+          <Control
+            label={`${isMicrophoneEnabled ? "關麥克風" : "開麥克風"}（${MOD}D）`}
+            active={isMicrophoneEnabled}
+            pending={mic.pending}
+            onClick={() => mic.toggle()}
+          >
+            {isMicrophoneEnabled ? <MicIcon /> : <MicOffIcon />}
+          </Control>
+          <DeviceMenu kind="audioinput" label="麥克風" />
+        </div>
+        <div className="flex items-center gap-1">
+          <Control
+            label={`${isCameraEnabled ? "關鏡頭" : "開鏡頭"}（${MOD}E）`}
+            active={isCameraEnabled}
+            pending={camera.pending}
+            onClick={() => camera.toggle()}
+          >
+            {isCameraEnabled ? <VideoIcon /> : <VideoOffIcon />}
+          </Control>
+          <DeviceMenu kind="videoinput" label="鏡頭" />
+        </div>
         <Control
           label={roomMic.on ? "關閉會議室收音" : "會議室收音"}
           active={roomMic.on}
