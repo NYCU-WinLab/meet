@@ -40,7 +40,7 @@ import {
   VideoIcon,
   VideoOffIcon,
 } from "lucide-react"
-import { useRouter } from "next/navigation"
+import { useParams, useRouter } from "next/navigation"
 import * as React from "react"
 import { createPortal } from "react-dom"
 import { toast } from "sonner"
@@ -873,8 +873,10 @@ function PanelTabs({
   open: boolean
   summary: Summary | null
 }) {
-  const room = useRoomContext()
-  const key = TAB_KEY + room.name
+  // From the URL: the LiveKit room has no name until it connects, after
+  // this first render reads the saved tab.
+  const { room } = useParams<{ room: string }>()
+  const key = TAB_KEY + room
   // The meeting mounts only in the browser, after the lobby.
   const [tab, setTab] = React.useState<PanelTab>(() => {
     try {
