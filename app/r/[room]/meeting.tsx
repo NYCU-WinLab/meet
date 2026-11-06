@@ -20,6 +20,7 @@ import {
   ConnectionState,
   ParticipantEvent,
   Track,
+  type RoomOptions,
 } from "livekit-client"
 import {
   CircleCheckIcon,
@@ -62,6 +63,10 @@ import type { MediaChoices } from "./lobby"
 /** The top-right corner the page leaves empty for the controls. */
 export const CONTROLS_SLOT = "meet-controls"
 
+// Subscribers get each video at the size its tile shows, and publishers stop
+// sending layers nobody watches.
+const ROOM_OPTIONS: RoomOptions = { adaptiveStream: true, dynacast: true }
+
 export function Meeting({
   serverUrl,
   token,
@@ -87,6 +92,7 @@ export function Meeting({
       serverUrl={serverUrl}
       token={token}
       connect
+      options={ROOM_OPTIONS}
       audio={
         choices.audio ? { deviceId: choices.audioDeviceId || undefined } : false
       }
