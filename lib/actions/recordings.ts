@@ -571,6 +571,9 @@ async function searchable(actor: Actor, asUsers?: string[]) {
   if (actor.service !== "summary" || !asUsers?.length)
     throw new Error("只給成員或摘要服務用")
   const ids = [...new Set(asUsers)]
+  // A test participant or a guest has an identity that is not a user id.
+  const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+  if (!ids.every((id) => UUID.test(id))) return []
   const rows = await db
     .select({ id: user.id, username: user.username })
     .from(user)
