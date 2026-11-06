@@ -47,6 +47,14 @@ const components: Components = {
       {children}
     </pre>
   ),
+  // The notes come from a model, so an image could point anywhere and load
+  // on page open. Show it as a link the member clicks instead.
+  img: ({ src, alt }) =>
+    typeof src === "string" ? (
+      <a href={src} target="_blank" rel="noreferrer" className="underline">
+        {alt || src}
+      </a>
+    ) : null,
   hr: () => <hr className="mt-6 first:mt-0" />,
   table: ({ children }) => (
     <div className="mt-3 overflow-x-auto first:mt-0">
