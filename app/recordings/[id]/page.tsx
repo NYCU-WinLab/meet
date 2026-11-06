@@ -9,6 +9,8 @@ import { runAction } from "@/lib/actions/define"
 import { getRecording } from "@/lib/actions/recordings"
 import { requireActor } from "@/lib/auth/session"
 
+import { TranscriptPlayer } from "./transcript-player"
+
 export const dynamic = "force-dynamic"
 
 const when = new Intl.DateTimeFormat("zh-TW", {
@@ -53,6 +55,7 @@ export default async function RecordingPage({
     return kind ? [{ ...file, label: kind[1] }] : []
   })
   const video = files.find((f) => f.name.endsWith(".mp4"))
+  const srt = files.find((f) => f.name.endsWith(".srt"))
   return (
     <MeetShell page={{ label: "會議紀錄", href: "/recordings", tip: "" }}>
       <div className="flex flex-col gap-12">
@@ -72,11 +75,9 @@ export default async function RecordingPage({
           }
         />
         {video && (
-          <video
-            controls
-            preload="metadata"
-            src={href(video.name)}
-            className="aspect-video w-full bg-muted"
+          <TranscriptPlayer
+            videoUrl={href(video.name)}
+            srtUrl={srt ? href(srt.name) : undefined}
           />
         )}
         <FieldList>
