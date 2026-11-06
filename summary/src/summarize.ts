@@ -11,8 +11,58 @@ const model = process.env.SUMMARY_MODEL ?? "claude-haiku-5-5"
 /** How hard the model thinks: low, medium or high. */
 const effort = process.env.SUMMARY_EFFORT ?? "medium"
 
-// The only tool: web search, for questions the meeting itself cannot answer.
-const tools = [{ type: "web_search_20250305", name: "web_search", max_uses: 3 }]
+const meetUrl = process.env.MEET_URL ?? "https://meet.winlab.tw"
+const serviceKey = process.env.MEET_SERVICE_KEY ?? ""
+
+// Web search for what the meeting cannot answer, and search_meetings for
+// what was said in the asker's past meetings (meet's search_recordings,
+// run as the asker so they only see meetings they may open).
+const tools = [
+  { type: "web_search_20250305", name: "web_search", max_uses: 3 },
+  {
+    name: "search_meetings",
+    description:
+      "Search the asker's past meeting transcripts for a word or phrase. Returns matching lines with the meeting title, date and a link to the recording at that moment.",
+    input_schema: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description:
+            "A short keyword or phrase as it would be said, e.g. RCS2",
+        },
+      },
+      required: ["query"],
+    },
+  },
+]
+
+type Hit = {
+  title: string
+  startedAt: string
+  second: number
+  text: string
+  url: string
+}
+
+async function searchMeetings(query: string, asUser: string): Promise<Hit[]> {
+  if (!serviceKey || !asUser) return []
+  const response = await fetch(`${meetUrl}/api/actions/search_recordings`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${serviceKey}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ query, limit: 10, asUser }),
+    signal: AbortSignal.timeout(20_000),
+  })
+  if (!response.ok) throw new Error(`search_recordings ${response.status}`)
+  const data = (await response.json()) as { hits?: Hit[] }
+  return (data.hits ?? []).map((hit) => ({
+    ...hit,
+    url: new URL(hit.url, meetUrl).toString(),
+  }))
+}
 
 /** One agenda item and how far the meeting has covered it. */
 export type AgendaState = {
@@ -86,6 +136,7 @@ JSON 欄位：
 
 1. 會議裡談過的事，照摘要和逐字稿回答。逐字稿沒有就說會議沒談到，不猜。
 2. 會議外的事實、新聞、規格、文件，用 web_search 查，最多查 3 次。
+2a. 問到以前的會議（上次、之前誰說過），用 search_meetings 查關鍵字，最多查 3 次；回答寫出是哪場會議、哪天。
 3. 最多 5 句，純文字，不用 Markdown、不加標題、不列網址，系統會附上來源。
 4. 網路資料用自己的話改寫成繁體中文，不貼原文。
 5. 答不出來就直說，並說缺什麼資訊。
@@ -168,6 +219,9 @@ type Block = {
   type: string
   text?: string
   citations?: { url?: string; title?: string }[]
+  id?: string
+  name?: string
+  input?: { query?: string }
 }
 
 type Response = {
@@ -262,7 +316,9 @@ export async function answer(
   lines: Line[],
   who: string,
   question: string,
-  room: string
+  room: string,
+  /** The asker's meet user id, for search_meetings. */
+  askerId: string
 ): Promise<string> {
   const recent = [...lines].sort((a, b) => a.at - b.at).slice(-QUESTION_LINES)
   const messages: { role: "user" | "assistant"; content: unknown }[] = [
@@ -273,9 +329,48 @@ export async function answer(
   ]
   let data = await call(messages, { type: "auto" })
   reportUsage(room, "answer", model, data.usage)
-  // A long search can pause the turn; send it back to let it finish.
-  for (let i = 0; i < 3 && data.stop_reason === "pause_turn"; i++) {
+  // A long search can pause the turn, and search_meetings runs here; send
+  // the turn back until the model is done, at most 6 times.
+  const recordings: string[] = []
+  for (
+    let i = 0;
+    i < 6 &&
+    (data.stop_reason === "pause_turn" || data.stop_reason === "tool_use");
+    i++
+  ) {
     messages.push({ role: "assistant", content: data.content })
+    if (data.stop_reason === "tool_use") {
+      const results = await Promise.all(
+        data.content
+          .filter((part) => part.type === "tool_use")
+          .map(async (part) => {
+            const hits = await searchMeetings(
+              String(part.input?.query ?? "").slice(0, 100),
+              askerId
+            ).catch((error) => {
+              console.log(new Date().toISOString(), "search failed", error)
+              return null
+            })
+            for (const hit of hits ?? []) recordings.push(hit.url)
+            return {
+              type: "tool_result",
+              tool_use_id: part.id,
+              content:
+                hits === null
+                  ? "搜尋失敗"
+                  : JSON.stringify(
+                      hits.map(({ title, startedAt, second, text }) => ({
+                        title,
+                        startedAt,
+                        second,
+                        text,
+                      }))
+                    ),
+            }
+          })
+      )
+      messages.push({ role: "user", content: results })
+    }
     data = await call(messages, { type: "auto" })
     reportUsage(room, "answer", model, data.usage)
   }
@@ -289,5 +384,9 @@ export async function answer(
       )
     ),
   ].slice(0, 3)
-  return sources.length > 0 ? `${text}\n\n來源：\n${sources.join("\n")}` : text
+  const watched = [...new Set(recordings)].slice(0, 3)
+  const parts = [text]
+  if (sources.length > 0) parts.push(`來源：\n${sources.join("\n")}`)
+  if (watched.length > 0) parts.push(`相關錄影：\n${watched.join("\n")}`)
+  return parts.join("\n\n")
 }

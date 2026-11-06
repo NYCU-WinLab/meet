@@ -190,7 +190,7 @@ async function join(name: string, agenda: AgendaState[]) {
           text: said,
         })
         log(name, "chat line", said.length, "chars")
-        if (MENTION.test(said)) void ask(meeting, who, said)
+        if (MENTION.test(said)) void ask(meeting, who, said, identity)
       })
       .catch((error) => log(name, "chat read failed", error))
   })
@@ -311,7 +311,12 @@ const hasContent = (summary: Summary) =>
 
 // Answers one @agent question in the chat, and keeps the answer as a line
 // so the summary knows what was said.
-async function ask(meeting: Meeting, who: string, said: string) {
+async function ask(
+  meeting: Meeting,
+  who: string,
+  said: string,
+  identity: string
+) {
   const reply = async (text: string) => {
     await meeting.room.localParticipant?.sendText(text, {
       topic: CHAT_TOPIC,
@@ -330,7 +335,8 @@ async function ask(meeting: Meeting, who: string, said: string) {
       meeting.lines,
       who,
       question,
-      meeting.name
+      meeting.name,
+      identity
     )
     await reply(text)
     meeting.lines.push({ at: Date.now(), who: "agent（聊天）", text })
