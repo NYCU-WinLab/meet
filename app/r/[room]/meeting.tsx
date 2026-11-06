@@ -18,6 +18,7 @@ import {
 import {
   ConnectionQuality,
   ConnectionState,
+  DisconnectReason,
   ParticipantEvent,
   Track,
   type RoomOptions,
@@ -60,6 +61,7 @@ import {
 import { cn } from "@/lib/utils"
 
 import { DeviceMenu } from "./device-menu"
+import { HostProvider, ModerationListener, TileModeration } from "./host"
 import type { MediaChoices } from "./lobby"
 import { ReactionListener, ReactionPicker, TileReactions } from "./reactions"
 import {
@@ -84,12 +86,15 @@ export function Meeting({
   serverUrl,
   token,
   endsAt,
+  host,
   choices,
 }: {
   serverUrl: string
   token: string
   /** When a scheduled meeting ends, for the last-10-minutes reminder. */
   endsAt: Date | null
+  /** Whether this member opened the room and may moderate it. */
+  host: boolean
   choices: MediaChoices
 }) {
   const router = useRouter()
@@ -106,46 +111,57 @@ export function Meeting({
     return () => window.removeEventListener(OPEN_CHAT_EVENT, show)
   }, [])
   return (
-    <LiveKitRoom
-      serverUrl={serverUrl}
-      token={token}
-      connect
-      options={ROOM_OPTIONS}
-      audio={
-        choices.audio ? { deviceId: choices.audioDeviceId || undefined } : false
-      }
-      video={
-        choices.video ? { deviceId: choices.videoDeviceId || undefined } : false
-      }
-      onDisconnected={() => router.push("/")}
-      onError={(error) => toast.error(error.message)}
-      onMediaDeviceFailure={(failure) => {
-        if (failure) toast.error("開不了鏡頭或麥克風，請檢查瀏覽器權限")
-      }}
-      className="fixed top-18 right-6 bottom-6 left-6 flex flex-col gap-6 md:top-22 md:flex-row md:gap-0"
-    >
-      <RoomAudioRenderer />
-      <SummaryListener onSummary={setSummary} />
-      <ReactionListener />
-      <LowerHandWhenSpeaking />
-      <Shortcuts />
-      <RestoreRoomMic />
-      <Reconnecting />
-      {/* A phone shows the open panel instead of the stage; wider screens show both. */}
-      <div
-        className={cn(
-          "min-h-0 min-w-0 flex-1 flex-col",
-          open ? "hidden md:flex" : "flex"
-        )}
+    <HostProvider value={host}>
+      <LiveKitRoom
+        serverUrl={serverUrl}
+        token={token}
+        connect
+        options={ROOM_OPTIONS}
+        audio={
+          choices.audio
+            ? { deviceId: choices.audioDeviceId || undefined }
+            : false
+        }
+        video={
+          choices.video
+            ? { deviceId: choices.videoDeviceId || undefined }
+            : false
+        }
+        onDisconnected={(reason) => {
+          if (reason === DisconnectReason.PARTICIPANT_REMOVED)
+            toast("主持人已請你離開會議")
+          router.push("/")
+        }}
+        onError={(error) => toast.error(error.message)}
+        onMediaDeviceFailure={(failure) => {
+          if (failure) toast.error("開不了鏡頭或麥克風，請檢查瀏覽器權限")
+        }}
+        className="fixed top-18 right-6 bottom-6 left-6 flex flex-col gap-6 md:top-22 md:flex-row md:gap-0"
       >
-        <Stage />
-      </div>
-      <MeetingPanel open={open} summary={summary} />
-      <div className="flex justify-center md:hidden">
-        <Controls open={open} onToggle={toggle} pending={pending} />
-      </div>
-      <ControlsInCorner open={open} onToggle={toggle} pending={pending} />
-    </LiveKitRoom>
+        <RoomAudioRenderer />
+        <SummaryListener onSummary={setSummary} />
+        <ModerationListener />
+        <ReactionListener />
+        <LowerHandWhenSpeaking />
+        <Shortcuts />
+        <RestoreRoomMic />
+        <Reconnecting />
+        {/* A phone shows the open panel instead of the stage; wider screens show both. */}
+        <div
+          className={cn(
+            "min-h-0 min-w-0 flex-1 flex-col",
+            open ? "hidden md:flex" : "flex"
+          )}
+        >
+          <Stage />
+        </div>
+        <MeetingPanel open={open} summary={summary} />
+        <div className="flex justify-center md:hidden">
+          <Controls open={open} onToggle={toggle} pending={pending} />
+        </div>
+        <ControlsInCorner open={open} onToggle={toggle} pending={pending} />
+      </LiveKitRoom>
+    </HostProvider>
   )
 }
 
@@ -298,6 +314,7 @@ function Tile({
       >
         {pinned ? <PinOffIcon /> : <PinIcon />}
       </Button>
+      {!screen && <TileModeration participant={participant} />}
     </div>
   )
 }

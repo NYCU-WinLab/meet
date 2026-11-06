@@ -1,7 +1,11 @@
 "use server"
 
 import { errorMessage, runAction } from "@/lib/actions/define"
-import { createRoomAction, endRoom } from "@/lib/actions/rooms"
+import {
+  createRoomAction,
+  endRoom,
+  moderateParticipant,
+} from "@/lib/actions/rooms"
 import { requireActor } from "@/lib/auth/session"
 
 // The writes a page makes, each one an action run as the signed-in member.
@@ -26,6 +30,20 @@ export async function endRoomAction(name: string) {
   const actor = await requireActor("/")
   try {
     await runAction(endRoom, actor, { name })
+    return { ok: true as const }
+  } catch (error) {
+    return { ok: false as const, error: errorMessage(error) }
+  }
+}
+
+export async function moderateAction(
+  name: string,
+  identity: string,
+  action: "mute_mic" | "stop_camera" | "lower_hand" | "remove"
+) {
+  const actor = await requireActor(`/r/${name}`)
+  try {
+    await runAction(moderateParticipant, actor, { name, identity, action })
     return { ok: true as const }
   } catch (error) {
     return { ok: false as const, error: errorMessage(error) }
