@@ -47,6 +47,7 @@ import { toast } from "sonner"
 
 import { Chat } from "@/components/chat"
 import { Button } from "@/components/ui/button"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   Tooltip,
   TooltipContent,
@@ -853,17 +854,97 @@ function MeetingPanel({
             : "opacity-0 md:translate-x-8 md:motion-reduce:translate-x-0"
         )}
       >
-        <SummaryPanel summary={summary} />
-        <Chat />
+        <PanelTabs open={open} summary={summary} />
       </aside>
     </div>
+  )
+}
+
+type PanelTab = "summary" | "chat"
+const TAB_KEY = "meet.panel-tab."
+
+// The panel holds one thing at a time, so each gets its full height. Both
+// stay mounted: the chat keeps its messages and counts what arrives while
+// the summary is in front. The tab is remembered per room.
+function PanelTabs({
+  open,
+  summary,
+}: {
+  open: boolean
+  summary: Summary | null
+}) {
+  const room = useRoomContext()
+  const key = TAB_KEY + room.name
+  // The meeting mounts only in the browser, after the lobby.
+  const [tab, setTab] = React.useState<PanelTab>(() => {
+    try {
+      return localStorage.getItem(key) === "chat" ? "chat" : "summary"
+    } catch {
+      return "summary"
+    }
+  })
+  const [unread, setUnread] = React.useState(0)
+  const pick = (next: PanelTab) => {
+    setTab(next)
+    try {
+      localStorage.setItem(key, next)
+    } catch {}
+  }
+  const current = summary?.agenda?.find((item) => item.status === "partial")
+
+  return (
+    <Tabs
+      value={tab}
+      onValueChange={(next) => pick(next as PanelTab)}
+      className="flex min-h-0 flex-1 flex-col gap-0"
+    >
+      <div className="shrink-0 px-4 pt-4">
+        <TabsList className="w-full">
+          <TabsTrigger value="summary">摘要</TabsTrigger>
+          <TabsTrigger value="chat">
+            聊天
+            {unread > 0 && (
+              <span
+                aria-label={`${unread} 則未讀`}
+                className="flex size-5 items-center justify-center rounded-full bg-destructive text-primary-foreground tabular-nums"
+              >
+                {unread}
+              </span>
+            )}
+          </TabsTrigger>
+        </TabsList>
+      </div>
+      <TabsContent
+        value="summary"
+        keepMounted
+        className="flex min-h-0 flex-1 flex-col [&[hidden]]:hidden"
+      >
+        <SummaryPanel summary={summary} />
+      </TabsContent>
+      <TabsContent
+        value="chat"
+        keepMounted
+        className="flex min-h-0 flex-1 flex-col [&[hidden]]:hidden"
+      >
+        {current && (
+          <button
+            type="button"
+            onClick={() => pick("summary")}
+            className="mx-4 mt-4 flex shrink-0 items-center gap-2 rounded-control bg-background/60 px-3 py-2 text-left transition-colors duration-state hover:bg-background [&_svg]:size-4 [&_svg]:shrink-0"
+          >
+            {statusIcon.partial}
+            <span className="truncate">{current.text}</span>
+          </button>
+        )}
+        <Chat visible={open && tab === "chat"} onUnread={setUnread} />
+      </TabsContent>
+    </Tabs>
   )
 }
 
 function SummaryPanel({ summary }: { summary: Summary | null }) {
   return (
     <section className="flex min-h-0 flex-1 basis-0 flex-col gap-6 overflow-y-auto p-4 leading-7">
-      <h2 className="text-muted-foreground">摘要</h2>
       {summary?.agenda && summary.agenda.length > 0 && (
         <AgendaList items={summary.agenda} />
       )}

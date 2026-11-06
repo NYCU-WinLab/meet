@@ -25,7 +25,15 @@ const AGENT: Person = { identity: "agent", name: "agent", agent: true }
 /** Messages from one person within 5 minutes share one header. */
 const RUN_MS = 5 * 60 * 1000
 
-export function Chat() {
+export function Chat({
+  visible,
+  onUnread,
+}: {
+  /** False while another tab covers the chat. */
+  visible: boolean
+  /** Messages from others that arrived while the chat was not visible. */
+  onUnread: (count: number) => void
+}) {
   const { chatMessages, send, isSending } = useChat()
   const { localParticipant } = useLocalParticipant()
   const participants = useParticipants()
@@ -44,12 +52,22 @@ export function Chat() {
   const myName = localParticipant.name || localParticipant.identity
 
   React.useEffect(() => {
-    bottom.current?.scrollIntoView({ block: "end" })
-  }, [chatMessages.length])
+    if (visible) bottom.current?.scrollIntoView({ block: "end" })
+  }, [chatMessages.length, visible])
+
+  // Everything up to `seen` was on screen once; count the rest from others.
+  const seen = React.useRef(0)
+  React.useEffect(() => {
+    if (visible) seen.current = chatMessages.length
+    onUnread(
+      chatMessages
+        .slice(seen.current)
+        .filter((m) => !senderOf(m, localParticipant.identity).mine).length
+    )
+  }, [visible, chatMessages, localParticipant.identity, onUnread])
 
   return (
-    <section className="flex min-h-0 flex-1 basis-0 flex-col border-t">
-      <h2 className="px-4 pt-4 text-muted-foreground">聊天</h2>
+    <section className="flex min-h-0 flex-1 basis-0 flex-col">
       <ol className="flex min-h-0 flex-1 flex-col overflow-y-auto py-2">
         {chatMessages.length === 0 && (
           <li className="px-4 py-2 text-muted-foreground">還沒有人說話</li>
