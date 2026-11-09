@@ -221,10 +221,12 @@ type Sender = {
 function senderOf(message: ReceivedChatMessage, me: string): Sender {
   // The agent is hidden, so its replies carry a mark instead of a sender.
   // Only the summary service may carry the mark; anyone else could pass a
-  // made-up answer off as the agent's.
+  // made-up answer off as the agent's. The service joins hidden, so the
+  // client has no participant for it and `from` is empty; every visible
+  // sender, guests included, has one.
   if (
     message.attributes?.["meet.agent"] === "1" &&
-    message.from?.identity === SUMMARY_IDENTITY
+    (!message.from || message.from.identity === SUMMARY_IDENTITY)
   )
     return {
       key: "agent",
