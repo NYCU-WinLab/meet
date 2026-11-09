@@ -10,6 +10,13 @@ import {
   scheduleRoom,
   updateScheduledRoom,
 } from "@/lib/actions/rooms"
+import {
+  createGuestLink,
+  guestLinkInfo,
+  joinAsGuest,
+  listGuestLinks,
+  revokeGuestLink,
+} from "@/lib/actions/guests"
 import { recordAiUsage } from "@/lib/actions/ai-usage"
 import { dashboard } from "@/lib/actions/dashboard"
 import {
@@ -35,6 +42,11 @@ export const actions: Action[] = [
   joinRoom,
   moderateParticipant,
   endRoom,
+  createGuestLink,
+  listGuestLinks,
+  revokeGuestLink,
+  guestLinkInfo,
+  joinAsGuest,
   dashboard,
   recordAiUsage,
   recordingGaps,

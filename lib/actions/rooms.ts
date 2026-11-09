@@ -24,7 +24,7 @@ import { emitErrorLog } from "@/lib/otel"
 
 // Room names are short ids in the link (/r/<name>), never typed; the title
 // members read is in the room's metadata.
-const roomName = z
+export const roomName = z
   .string()
   .regex(/^[a-z0-9]{3,32}(?:-[a-z0-9]{3,32})*$/, "沒有這個會議室")
 
@@ -35,7 +35,7 @@ function newRoomName() {
   return `${chars.slice(0, 3).join("")}-${chars.slice(3, 6).join("")}-${chars.slice(6).join("")}`
 }
 
-async function member(userId: string) {
+export async function member(userId: string) {
   const [row] = await db
     .select({ id: user.id, name: user.name, username: user.username })
     .from(user)
@@ -326,6 +326,8 @@ export type JoinState =
       endsAt: Date | null
       /** Whether this member opened the room and may moderate it. */
       host?: boolean
+      /** Whether this member may make guest links. */
+      admin?: boolean
     }
   | { state: "early"; title: string; opensAt: Date; startsAt: Date }
   | { state: "ended"; title: string }
@@ -337,7 +339,7 @@ export type JoinState =
 // way in, so issues added since the booking show; a booking portal says is
 // cancelled is cancelled here too, and portal not answering keeps the
 // stored list.
-async function openScheduled(name: string): Promise<JoinState | null> {
+export async function openScheduled(name: string): Promise<JoinState | null> {
   const [row] = await db
     .select()
     .from(scheduledRoom)
@@ -418,11 +420,29 @@ export const joinRoom = defineAction({
       me.username,
       parseMetadata((room ?? (await getRoom(input.name)))?.metadata ?? "")
     )
-    return { state: "ready", title, endsAt, host, ...credentials }
+    return {
+      state: "ready",
+      title,
+      endsAt,
+      host,
+      admin: isAdmin(me.username),
+      ...credentials,
+    }
   },
   mcpExcludedBecause:
     "It mints a browser credential; an agent joins a room with its own LiveKit token, not a member's.",
 })
+
+/** Admins may let people without a lab account in (guest links). They
+ * are the usernames in MEET_ADMINS, comma separated. */
+export function isAdmin(username: string | null) {
+  if (!username) return false
+  const admins = (process.env.MEET_ADMINS ?? "")
+    .split(",")
+    .map((name) => name.trim())
+    .filter(Boolean)
+  return admins.includes(username)
+}
 
 /** The host is the member who opened the room (portal's booker for a
  * scheduled one); an account without a username is nobody's host. */

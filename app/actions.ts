@@ -6,6 +6,7 @@ import {
   endRoom,
   moderateParticipant,
 } from "@/lib/actions/rooms"
+import { createGuestLink, joinAsGuest } from "@/lib/actions/guests"
 import { requireActor } from "@/lib/auth/session"
 
 // The writes a page makes, each one an action run as the signed-in member.
@@ -45,6 +46,41 @@ export async function moderateAction(
   try {
     await runAction(moderateParticipant, actor, { name, identity, action })
     return { ok: true as const }
+  } catch (error) {
+    return { ok: false as const, error: errorMessage(error) }
+  }
+}
+
+export async function createGuestLinkAction(
+  name: string,
+  hours: number,
+  label?: string
+) {
+  const actor = await requireActor(`/r/${name}`)
+  try {
+    const link = await runAction(createGuestLink, actor, {
+      name,
+      hours,
+      label,
+    })
+    return { ok: true as const, url: link.url, expiresAt: link.expiresAt }
+  } catch (error) {
+    return { ok: false as const, error: errorMessage(error) }
+  }
+}
+
+// The one write a person without an account makes: the secret in their
+// guest link is the check, so there is no actor to require.
+export async function joinAsGuestAction(secret: string, name: string) {
+  try {
+    return {
+      ok: true as const,
+      joined: await runAction(
+        joinAsGuest,
+        { userId: "", via: "web" },
+        { secret, name }
+      ),
+    }
   } catch (error) {
     return { ok: false as const, error: errorMessage(error) }
   }
