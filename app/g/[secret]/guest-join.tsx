@@ -64,7 +64,7 @@ export function GuestJoin({
             : ""
 
   return (
-    <div className="fixed top-18 right-6 bottom-6 left-6 flex overflow-y-auto md:top-22">
+    <div className="fixed top-16 right-4 bottom-4 left-4 flex overflow-y-auto md:top-20">
       <form
         className="m-auto flex w-full max-w-md flex-col gap-6"
         onSubmit={(event) => {
