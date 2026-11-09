@@ -108,7 +108,7 @@ function AppShell({
         />
       )}
 
-      <header className="fixed top-6 left-6 z-50 flex items-center gap-4">
+      <header className="fixed top-4 left-4 z-50 flex items-center gap-4">
         {corners?.topLeft ?? (
           <nav aria-label="位置" className="flex items-center gap-2">
             {breadcrumb.map((crumb, index) => {
@@ -140,7 +140,7 @@ function AppShell({
         )}
       </header>
 
-      <div className="fixed top-6 right-6 z-50 flex items-center gap-4">
+      <div className="fixed top-4 right-4 z-50 flex items-center gap-4">
         {corners?.topRight ?? (
           <>
             {nav.length > 0 && <PageNav nav={nav} isCurrent={isCurrent} />}
@@ -151,13 +151,13 @@ function AppShell({
       </div>
 
       {footer && (
-        <div className="fixed bottom-6 left-6 z-50 flex items-center gap-4">
+        <div className="fixed bottom-4 left-4 z-50 flex items-center gap-4">
           {corners?.bottomLeft ?? <BuildVersion build={build} />}
         </div>
       )}
 
       {footer && (
-        <div className="fixed right-6 bottom-6 z-50 flex items-center gap-4">
+        <div className="fixed right-4 bottom-4 z-50 flex items-center gap-4">
           {corners?.bottomRight ?? (
             <CornerTip tip="NYCU WinLab" corner="bottom-right">
               <span
@@ -176,7 +176,7 @@ function AppShell({
           <div className="w-full max-w-2xl">{children}</div>
         </main>
       ) : layout === "wide" ? (
-        <main className="w-full px-6 pt-24 pb-24">{children}</main>
+        <main className="w-full px-4 pt-24 pb-24">{children}</main>
       ) : (
         <main className="mx-auto w-full max-w-4xl px-6 pt-24 pb-24">
           {children}
