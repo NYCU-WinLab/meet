@@ -45,6 +45,7 @@ import {
   PinOffIcon,
   SignalLowIcon,
   SwitchCameraIcon,
+  UserPlusIcon,
   UsersRoundIcon,
   VideoIcon,
   VideoOffIcon,
@@ -79,6 +80,7 @@ import {
   useCaptions,
 } from "./captions"
 import { DeviceMenu } from "./device-menu"
+import { GuestInvite } from "./guest-invite"
 import { HostProvider, ModerationListener, TileModeration } from "./host"
 import type { MediaChoices } from "./lobby"
 import { ReactionListener, ReactionPicker, TileReactions } from "./reactions"
@@ -105,6 +107,9 @@ export function Meeting({
   token,
   endsAt,
   host,
+  admin = false,
+  guest = false,
+  onLeave,
   choices,
 }: {
   serverUrl: string
@@ -113,6 +118,12 @@ export function Meeting({
   endsAt: Date | null
   /** Whether this member opened the room and may moderate it. */
   host: boolean
+  /** Whether this member may make guest links. */
+  admin?: boolean
+  /** A person without an account, in through a guest link. */
+  guest?: boolean
+  /** Where leaving goes; the room list when left out. */
+  onLeave?: () => void
   choices: MediaChoices
 }) {
   const router = useRouter()
@@ -149,7 +160,8 @@ export function Meeting({
           onDisconnected={(reason) => {
             if (reason === DisconnectReason.PARTICIPANT_REMOVED)
               toast("主持人已請你離開會議")
-            router.push("/")
+            if (onLeave) onLeave()
+            else router.push("/")
           }}
           onError={(error) => toast.error(error.message)}
           onMediaDeviceFailure={(failure) => {
@@ -163,7 +175,7 @@ export function Meeting({
           <ReactionListener />
           <LowerHandWhenSpeaking />
           <Shortcuts />
-          <RestoreRoomMic />
+          {!guest && <RestoreRoomMic />}
           <Reconnecting />
           {/* A phone shows the open panel instead of the stage; wider screens show both. */}
           <div
@@ -177,9 +189,21 @@ export function Meeting({
           </div>
           <MeetingPanel open={open} summary={summary} />
           <div className="flex justify-center md:hidden">
-            <Controls open={open} onToggle={toggle} pending={pending} />
+            <Controls
+              open={open}
+              onToggle={toggle}
+              pending={pending}
+              admin={admin}
+              guest={guest}
+            />
           </div>
-          <ControlsInCorner open={open} onToggle={toggle} pending={pending} />
+          <ControlsInCorner
+            open={open}
+            onToggle={toggle}
+            pending={pending}
+            admin={admin}
+            guest={guest}
+          />
         </LiveKitRoom>
       </CaptionsProvider>
     </HostProvider>
@@ -358,11 +382,17 @@ function Controls({
   open,
   onToggle,
   pending,
+  admin,
+  guest,
 }: {
   open: boolean
   onToggle: () => void
   /** Agenda items not yet discussed, shown on the panel control. */
   pending: number
+  /** May make guest links. */
+  admin: boolean
+  /** In through a guest link: no room microphone, no meeting link to copy. */
+  guest: boolean
 }) {
   const room = useRoomContext()
   const { isMicrophoneEnabled, isCameraEnabled, isScreenShareEnabled } =
@@ -371,6 +401,7 @@ function Controls({
   const camera = useTrackToggle({ source: Track.Source.Camera })
   const roomMic = useRoomMic()
   const hand = useMyHand()
+  const [inviting, setInviting] = React.useState(false)
   const wasSharing = React.useRef(false)
   const screen = useTrackToggle({
     source: Track.Source.ScreenShare,
@@ -422,13 +453,15 @@ function Controls({
           </span>
         </div>
         <div className="flex items-center gap-3 max-md:hidden">
-          <Control
-            label={roomMic.on ? "關閉會議室收音" : "會議室收音"}
-            active={roomMic.on}
-            onClick={() => void roomMic.set(!roomMic.on)}
-          >
-            <UsersRoundIcon />
-          </Control>
+          {!guest && (
+            <Control
+              label={roomMic.on ? "關閉會議室收音" : "會議室收音"}
+              active={roomMic.on}
+              onClick={() => void roomMic.set(!roomMic.on)}
+            >
+              <UsersRoundIcon />
+            </Control>
+          )}
           <Control
             label={isScreenShareEnabled ? "停止分享螢幕" : "分享螢幕"}
             active={isScreenShareEnabled}
@@ -466,23 +499,45 @@ function Controls({
           hand={hand}
           sharing={isScreenShareEnabled}
           onShare={() => screen.toggle()}
+          guest={guest}
+          onInvite={admin ? () => setInviting(true) : undefined}
         />
+        {admin && <GuestInvite open={inviting} onOpenChange={setInviting} />}
         <div className="flex items-center gap-3 max-md:hidden">
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  variant="outline"
-                  size="icon"
-                  aria-label="複製會議連結"
-                  onClick={() => void copyLink()}
-                />
-              }
-            >
-              <LinkIcon />
-            </TooltipTrigger>
-            <TooltipContent>複製會議連結</TooltipContent>
-          </Tooltip>
+          {admin && (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    aria-label="邀請訪客"
+                    onClick={() => setInviting(true)}
+                  />
+                }
+              >
+                <UserPlusIcon />
+              </TooltipTrigger>
+              <TooltipContent>邀請訪客</TooltipContent>
+            </Tooltip>
+          )}
+          {!guest && (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    aria-label="複製會議連結"
+                    onClick={() => void copyLink()}
+                  />
+                }
+              >
+                <LinkIcon />
+              </TooltipTrigger>
+              <TooltipContent>複製會議連結</TooltipContent>
+            </Tooltip>
+          )}
           <PipControl />
           <Divider />
         </div>
@@ -518,11 +573,16 @@ function MoreMenu({
   hand,
   sharing,
   onShare,
+  guest,
+  onInvite,
 }: {
   roomMic: ReturnType<typeof useRoomMic>
   hand: ReturnType<typeof useMyHand>
   sharing: boolean
   onShare: () => void
+  guest: boolean
+  /** Opens the guest link form; admins only. */
+  onInvite?: () => void
 }) {
   const room = useRoomContext()
   const captions = useCaptions()
@@ -576,20 +636,30 @@ function MoreMenu({
           {captions.on ? <CaptionsOffIcon /> : <CaptionsIcon />}
           {captions.on ? "關閉字幕" : "字幕"}
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => void roomMic.set(!roomMic.on)}>
-          <UsersRoundIcon />
-          {roomMic.on ? "關閉會議室收音" : "會議室收音"}
-        </DropdownMenuItem>
+        {!guest && (
+          <DropdownMenuItem onClick={() => void roomMic.set(!roomMic.on)}>
+            <UsersRoundIcon />
+            {roomMic.on ? "關閉會議室收音" : "會議室收音"}
+          </DropdownMenuItem>
+        )}
         {canShare && (
           <DropdownMenuItem onClick={onShare}>
             {sharing ? <MonitorXIcon /> : <MonitorUpIcon />}
             {sharing ? "停止分享螢幕" : "分享螢幕"}
           </DropdownMenuItem>
         )}
-        <DropdownMenuItem onClick={() => void copyLink()}>
-          <LinkIcon />
-          複製會議連結
-        </DropdownMenuItem>
+        {!guest && (
+          <DropdownMenuItem onClick={() => void copyLink()}>
+            <LinkIcon />
+            複製會議連結
+          </DropdownMenuItem>
+        )}
+        {onInvite && (
+          <DropdownMenuItem onClick={onInvite}>
+            <UserPlusIcon />
+            邀請訪客
+          </DropdownMenuItem>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   )

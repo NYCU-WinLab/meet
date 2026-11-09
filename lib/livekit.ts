@@ -266,6 +266,8 @@ export async function joinToken(input: {
   room: string
   identity: string
   name: string
+  /** A guest may not rename itself (to pass as a member) or set attributes. */
+  guest?: boolean
 }) {
   const token = new AccessToken(apiKey(), apiSecret(), {
     identity: input.identity,
@@ -279,7 +281,7 @@ export async function joinToken(input: {
     canSubscribe: true,
     canPublishData: true,
     // The room-microphone switch is an attribute the member sets on itself.
-    canUpdateOwnMetadata: true,
+    canUpdateOwnMetadata: !input.guest,
   })
   return { serverUrl: url(), token: await token.toJwt() }
 }

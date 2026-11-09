@@ -57,6 +57,13 @@
       "when": 1793956569178,
       "tag": "0007_transcript_search",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1794185678691,
+      "tag": "0008_yellow_fixer",
+      "breakpoints": true
     }
   ]
 }

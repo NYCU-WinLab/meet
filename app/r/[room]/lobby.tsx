@@ -42,6 +42,9 @@ export function Room({
   token,
   endsAt,
   host,
+  admin = false,
+  guest = false,
+  onLeave,
 }: {
   title: string
   serverUrl: string
@@ -49,6 +52,12 @@ export function Room({
   endsAt: Date | null
   /** Whether this member opened the room and may moderate it. */
   host: boolean
+  /** Whether this member may make guest links. */
+  admin?: boolean
+  /** A person without an account, in through a guest link. */
+  guest?: boolean
+  /** Where leaving goes; the room list when left out. */
+  onLeave?: () => void
 }) {
   const [joined, setJoined] = React.useState<MediaChoices | null>(null)
   if (joined)
@@ -58,6 +67,9 @@ export function Room({
         token={token}
         endsAt={endsAt}
         host={host}
+        admin={admin}
+        guest={guest}
+        onLeave={onLeave}
         choices={joined}
       />
     )

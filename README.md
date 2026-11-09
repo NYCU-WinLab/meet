@@ -30,6 +30,7 @@ No account to make and nothing to install: lab members sign in with their lab ac
 - **Carries an agenda**: a booked room gets its items from portal (the booking's lines and the epic's open issues), asked again when the room opens; a room opened on the spot takes one line per item. The summary panel shows them as a checklist the running summary ticks off, and warns once when 10 minutes are left with items open.
 - **Meets in the browser**: camera, microphone and screen share, with the speaker ringed and muted members marked.
 - **Shows who is where**: the room list says who is in each room and refreshes as people come and go.
+- **Lets a guest in**: an admin makes a link for one room that works for 1 hour, 1 day or 7 days; someone without a lab account opens it, types a name and joins that meeting only.
 - **Ends a room** for everyone; an empty room closes by itself after 10 minutes.
 - **Serves MCP** at `/mcp`, with meet as the OAuth 2.1 authorization server, so an agent can list and open rooms as a member.
 
@@ -69,6 +70,7 @@ webhook:
 | `POSTGRES_PASSWORD` | The compose Postgres | required |
 | `MEET_VERSION` | Image tag | `main` |
 | `MEET_BIND`, `MEET_PORT` | Where web listens on the host | `127.0.0.1`, `3000` |
+| `MEET_ADMINS` | Usernames (comma separated) who may make guest links | none |
 | `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_HEADERS` | Where traces and logs go; off when empty | |
 
 meet.winlab.tw deploys on every push to `main`. The release workflow pushes the image, then sends a Carrel app release (`winfra/meet`). On the machine, carrel-deployd runs [deploy/carrel-start.sh](deploy/carrel-start.sh): it sets `MEET_VERSION` in `/opt/meet/.env` and waits until web is healthy. A failed health check rolls back to the previous release. The app unit has a drop-in with `Type=notify`, `NotifyAccess=all` and `TimeoutStartSec=300`, so the check waits for the new container.
