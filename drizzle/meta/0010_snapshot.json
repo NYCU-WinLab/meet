@@ -1,5 +1,5 @@
 {
-  "id": "77cac584-a04e-4786-b0b8-ac96b121f0d4",
+  "id": "aa8d8d1a-a942-4860-8d7d-7ab750bc596c",
   "prevId": "cc8e1189-18c6-4078-982a-5ac31d671a59",
   "version": "7",
   "dialect": "postgresql",
@@ -2245,21 +2245,7 @@
           "with": {}
         }
       },
-      "foreignKeys": {
-        "guest_links_created_by_users_id_fk": {
-          "name": "guest_links_created_by_users_id_fk",
-          "tableFrom": "guest_links",
-          "tableTo": "users",
-          "columnsFrom": [
-            "created_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
+      "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "guest_links_secretHash_unique": {

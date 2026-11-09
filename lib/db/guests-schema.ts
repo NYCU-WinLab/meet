@@ -9,8 +9,6 @@ import {
   uuid,
 } from "drizzle-orm/pg-core"
 
-import { user } from "@/lib/db/auth-schema"
-
 export const guestLink = pgTable(
   "guest_links",
   {
@@ -24,9 +22,9 @@ export const guestLink = pgTable(
     /** Who the link is for, as its maker wrote it; may be empty. */
     label: text().notNull().default(""),
     /** The meet user id of the member who made it. */
-    createdBy: uuid()
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
+    // No foreign key: a link and who came in through it stay on record
+    // even if the member's account is deleted.
+    createdBy: uuid().notNull(),
     expiresAt: timestamp({ withTimezone: true, mode: "date" }).notNull(),
     revokedAt: timestamp({ withTimezone: true, mode: "date" }),
     createdAt: timestamp({ withTimezone: true, mode: "date" })

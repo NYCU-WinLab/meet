@@ -1,2 +1,0 @@
-ALTER TABLE "guest_links" ALTER COLUMN "created_by" SET DATA TYPE uuid USING "created_by"::uuid;--> statement-breakpoint
-ALTER TABLE "guest_links" ADD CONSTRAINT "guest_links_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;
