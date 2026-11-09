@@ -25,6 +25,11 @@ import { createPortal } from "react-dom"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 
 // Picture-in-picture: the person speaking stays on screen while the member
@@ -173,15 +178,22 @@ export function PipControl() {
   const active = pipWindow !== null || floating
   return (
     <>
-      <Button
-        variant={active ? "default" : "outline"}
-        size="icon"
-        aria-label={active ? "關閉子母畫面" : "子母畫面"}
-        aria-pressed={active}
-        onClick={() => (active ? close() : void open())}
-      >
-        <PictureInPicture2Icon />
-      </Button>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              variant={active ? "default" : "outline"}
+              size="icon"
+              aria-label={active ? "關閉子母畫面" : "子母畫面"}
+              aria-pressed={active}
+              onClick={() => (active ? close() : void open())}
+            />
+          }
+        >
+          <PictureInPicture2Icon />
+        </TooltipTrigger>
+        <TooltipContent>{active ? "關閉子母畫面" : "子母畫面"}</TooltipContent>
+      </Tooltip>
       <video
         ref={video}
         muted
