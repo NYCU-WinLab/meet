@@ -39,6 +39,7 @@ export async function MeetShell({
         session
           ? [
               { label: "會議紀錄", href: "/recordings", tip: "" },
+              { label: "訪客連結", href: "/guests", tip: "" },
               { label: "儀表板", href: "/dashboard", tip: "" },
             ]
           : []

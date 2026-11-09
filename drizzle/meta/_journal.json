@@ -64,6 +64,13 @@
       "when": 1794185678691,
       "tag": "0008_yellow_fixer",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1794186617131,
+      "tag": "0009_spicy_kronos",
+      "breakpoints": true
     }
   ]
 }

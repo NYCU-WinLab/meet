@@ -108,7 +108,7 @@ export function Meeting({
   token,
   endsAt,
   host,
-  admin = false,
+  invite = false,
   guest = false,
   onLeave,
   choices,
@@ -119,8 +119,8 @@ export function Meeting({
   endsAt: Date | null
   /** Whether this member opened the room and may moderate it. */
   host: boolean
-  /** Whether this member may make guest links. */
-  admin?: boolean
+  /** Whether this person may make guest links: every member. */
+  invite?: boolean
   /** A person without an account, in through a guest link. */
   guest?: boolean
   /** Where leaving goes; the room list when left out. */
@@ -194,7 +194,7 @@ export function Meeting({
               open={open}
               onToggle={toggle}
               pending={pending}
-              admin={admin}
+              invite={invite}
               guest={guest}
             />
           </div>
@@ -202,7 +202,7 @@ export function Meeting({
             open={open}
             onToggle={toggle}
             pending={pending}
-            admin={admin}
+            invite={invite}
             guest={guest}
           />
         </LiveKitRoom>
@@ -383,15 +383,15 @@ function Controls({
   open,
   onToggle,
   pending,
-  admin,
+  invite,
   guest,
 }: {
   open: boolean
   onToggle: () => void
   /** Agenda items not yet discussed, shown on the panel control. */
   pending: number
-  /** May make guest links. */
-  admin: boolean
+  /** May make guest links: every member. */
+  invite: boolean
   /** In through a guest link: no room microphone, no meeting link to copy. */
   guest: boolean
 }) {
@@ -504,11 +504,11 @@ function Controls({
           sharing={isScreenShareEnabled}
           onShare={() => screen.toggle()}
           guest={guest}
-          onInvite={admin ? () => setInviting(true) : undefined}
+          onInvite={invite ? () => setInviting(true) : undefined}
         />
-        {admin && <GuestInvite open={inviting} onOpenChange={setInviting} />}
+        {invite && <GuestInvite open={inviting} onOpenChange={setInviting} />}
         <div className="flex items-center gap-3 max-md:hidden">
-          {admin && (
+          {invite && (
             <Tooltip>
               <TooltipTrigger
                 render={
@@ -585,7 +585,7 @@ function MoreMenu({
   sharing: boolean
   onShare: () => void
   guest: boolean
-  /** Opens the guest link form; admins only. */
+  /** Opens the guest link form; members only. */
   onInvite?: () => void
 }) {
   const room = useRoomContext()

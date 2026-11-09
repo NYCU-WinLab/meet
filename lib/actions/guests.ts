@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto"
 
-import { and, desc, eq, gt, isNull } from "drizzle-orm"
+import { and, desc, eq, gt, inArray, isNull } from "drizzle-orm"
 import { z } from "zod"
 
 import { defineAction, type Actor } from "@/lib/actions/define"
@@ -12,11 +12,12 @@ import {
   type JoinState,
 } from "@/lib/actions/rooms"
 import { db } from "@/lib/db"
-import { guestLink, scheduledRoom } from "@/lib/db/schema"
+import { guestJoin, guestLink, scheduledRoom, user } from "@/lib/db/schema"
 import { getRoom, joinToken, parseMetadata, unstamp } from "@/lib/livekit"
 
-// Guest links: an admin lets someone without a lab account into one room
-// for a while. The link carries a random secret, the guest's password; the
+// Guest links: any member lets someone without a lab account into one room
+// for a while. Admins (MEET_ADMINS) see every link, who made it and who
+// came in through it. The link carries a random secret, the guest's password; the
 // database keeps only its hash.
 
 /** How long a link may work, in hours: an hour, a day or a week. */
@@ -30,28 +31,30 @@ const hash = (secret: string) =>
   createHash("sha256").update(secret).digest("hex")
 const url = (secret: string) => `${process.env.BETTER_AUTH_URL}/g/${secret}`
 
-async function requireAdmin(actor: Actor) {
-  if (actor.service) throw new Error("只有管理員能管理訪客連結")
+/** A signed-in member; services cannot make or manage guest links. */
+async function requireMember(actor: Actor) {
+  if (actor.service) throw new Error("只有成員能管理訪客連結")
   const me = await member(actor.userId)
-  if (!isAdmin(me.username)) throw new Error("只有管理員能管理訪客連結")
-  return me
+  return { ...me, admin: isAdmin(me.username) }
 }
 
-/** An open room, or a scheduled one that is not cancelled. */
-async function roomExists(name: string) {
-  if (await getRoom(name)) return true
+/** The title of an open room, or of a scheduled one that is not
+ * cancelled; null when there is no such room. */
+async function roomTitle(name: string) {
+  const room = await getRoom(name)
+  if (room) return parseMetadata(room.metadata).title || name
   const [row] = await db
-    .select({ name: scheduledRoom.name })
+    .select({ title: scheduledRoom.title })
     .from(scheduledRoom)
     .where(and(eq(scheduledRoom.name, name), isNull(scheduledRoom.cancelledAt)))
-  return Boolean(row)
+  return row ? row.title : null
 }
 
 export const createGuestLink = defineAction({
   name: "create_guest_link",
   title: "產生訪客連結",
   description:
-    "Admins only. Makes a link that lets someone without a lab account join one room (an open room or a scheduled one) until it expires after hours (1, 24 or 168). The secret in the link is the password: share the whole link with the guest only. label says who it is for. Guests see the meeting only, never recordings or transcripts.",
+    "Any lab member. Makes a link that lets someone without a lab account join one room (an open room or a scheduled one) until it expires after hours (1, 24 or 168). The secret in the link is the password: share the whole link with the guest only. label says who it is for. Guests see the meeting only, never recordings or transcripts.",
   kind: "mutation",
   input: z.object({
     name: roomName,
@@ -64,8 +67,9 @@ export const createGuestLink = defineAction({
     label: z.string().trim().max(80, "對象最多 80 字").optional(),
   }),
   run: async (actor, input) => {
-    const me = await requireAdmin(actor)
-    if (!(await roomExists(input.name))) throw new Error("沒有這個會議室")
+    const me = await requireMember(actor)
+    const title = await roomTitle(input.name)
+    if (title === null) throw new Error("沒有這個會議室")
     const secret = Buffer.from(
       crypto.getRandomValues(new Uint8Array(32))
     ).toString("base64url")
@@ -75,6 +79,7 @@ export const createGuestLink = defineAction({
       id,
       secretHash: hash(secret),
       room: input.name,
+      title,
       label: input.label ?? "",
       createdBy: me.id,
       expiresAt,
@@ -83,33 +88,67 @@ export const createGuestLink = defineAction({
   },
 })
 
+/** How many links the list shows, newest first. */
+const LIST_MAX = 200
+
 export const listGuestLinks = defineAction({
   name: "list_guest_links",
   title: "訪客連結列表",
   description:
-    "Admins only. The guest links still working, newest first: id, room, label, expiresAt. The links themselves cannot be shown again; make a new one if it is lost.",
+    "Guest links, newest first (up to 200), including expired and revoked ones: id, room, title (the meeting's), label (who it is for), madeBy (the member's name), createdAt, expiresAt, revokedAt, active, and guests (each name typed on the way in, with joinedAt; up to 50 per link, the same name within 10 minutes once). Admins see every member's links; anyone else sees their own. admin says which. The links themselves cannot be shown again; make a new one if it is lost.",
   kind: "query",
   input: z.object({ name: roomName.optional() }),
   run: async (actor, input) => {
-    await requireAdmin(actor)
-    const links = await db
+    const me = await requireMember(actor)
+    const rows = await db
       .select({
         id: guestLink.id,
         room: guestLink.room,
+        title: guestLink.title,
         label: guestLink.label,
-        expiresAt: guestLink.expiresAt,
+        madeBy: user.name,
         createdAt: guestLink.createdAt,
+        expiresAt: guestLink.expiresAt,
+        revokedAt: guestLink.revokedAt,
       })
       .from(guestLink)
+      .leftJoin(user, eq(user.id, guestLink.createdBy))
       .where(
         and(
-          isNull(guestLink.revokedAt),
-          gt(guestLink.expiresAt, new Date()),
+          me.admin ? undefined : eq(guestLink.createdBy, me.id),
           input.name ? eq(guestLink.room, input.name) : undefined
         )
       )
       .orderBy(desc(guestLink.createdAt))
-    return { links }
+      .limit(LIST_MAX)
+    const joins = rows.length
+      ? await db
+          .select({
+            linkId: guestJoin.linkId,
+            name: guestJoin.name,
+            joinedAt: guestJoin.joinedAt,
+          })
+          .from(guestJoin)
+          .where(
+            inArray(
+              guestJoin.linkId,
+              rows.map((row) => row.id)
+            )
+          )
+          .orderBy(guestJoin.joinedAt)
+      : []
+    const now = Date.now()
+    return {
+      admin: me.admin,
+      links: rows.map((row) => ({
+        ...row,
+        madeBy: row.madeBy ?? "",
+        active: !row.revokedAt && row.expiresAt.getTime() > now,
+        guests: joins
+          .filter((join) => join.linkId === row.id)
+          .map(({ name, joinedAt }) => ({ name, joinedAt })),
+      })),
+    }
   },
 })
 
@@ -117,20 +156,51 @@ export const revokeGuestLink = defineAction({
   name: "revoke_guest_link",
   title: "撤銷訪客連結",
   description:
-    "Admins only. Stops a guest link from working, by its id from list_guest_links. A guest already in the meeting stays until they leave or the host removes them.",
+    "Stops a guest link from working, by its id from list_guest_links. The member who made it or an admin may revoke it. A guest already in the meeting stays until they leave or the host removes them.",
   kind: "mutation",
   input: z.object({ id: z.string().uuid("沒有這個訪客連結") }),
   run: async (actor, input) => {
-    await requireAdmin(actor)
+    const me = await requireMember(actor)
     const done = await db
       .update(guestLink)
       .set({ revokedAt: new Date() })
-      .where(and(eq(guestLink.id, input.id), isNull(guestLink.revokedAt)))
+      .where(
+        and(
+          eq(guestLink.id, input.id),
+          isNull(guestLink.revokedAt),
+          me.admin ? undefined : eq(guestLink.createdBy, me.id)
+        )
+      )
       .returning({ id: guestLink.id })
     if (done.length === 0) throw new Error("沒有這個訪客連結")
     return { revoked: true }
   },
 })
+
+/** Names kept per link: enough to see who came, bounded so a link holder
+ * asking for tokens over and over cannot grow the table or the list. */
+const JOINS_MAX = 50
+/** The same name again within this window is the same visit. */
+const SAME_VISIT_MS = 10 * 60 * 1000
+
+async function recordJoin(linkId: string, name: string) {
+  const recent = await db
+    .select({ name: guestJoin.name, joinedAt: guestJoin.joinedAt })
+    .from(guestJoin)
+    .where(eq(guestJoin.linkId, linkId))
+    .orderBy(desc(guestJoin.joinedAt))
+    .limit(JOINS_MAX)
+  if (recent.length >= JOINS_MAX) return
+  const now = Date.now()
+  if (
+    recent.some(
+      (join) =>
+        join.name === name && now - join.joinedAt.getTime() < SAME_VISIT_MS
+    )
+  )
+    return
+  await db.insert(guestJoin).values({ linkId, name })
+}
 
 /** The working link behind a secret, or null. */
 async function linkFor(secret: string) {
@@ -173,8 +243,8 @@ export const joinAsGuest = defineAction({
   name: "join_as_guest",
   title: "訪客加入",
   description:
-    "For the guest page: a LiveKit token for a person without an account to join the room their guest link opens, shown as 訪客 followed by their name.",
-  kind: "query",
+    "For the guest page: a LiveKit token for a person without an account to join the room their guest link opens, shown as 訪客 followed by their name. Records the name for list_guest_links.",
+  kind: "mutation",
   input: z.object({
     secret: secretOf,
     // Blank and invisible characters collapse to one space, so a padded
@@ -224,8 +294,11 @@ export const joinAsGuest = defineAction({
         )
       ),
     })
+    await recordJoin(link.id, input.name)
     return { state: "ready", title, endsAt, ...credentials }
   },
   mcpExcludedBecause:
     "It mints a browser credential for a person without an account.",
+  // Fetching a token is not news for every open page.
+  quiet: true,
 })

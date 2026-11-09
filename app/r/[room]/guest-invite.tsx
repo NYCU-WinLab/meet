@@ -29,7 +29,7 @@ const until = new Intl.DateTimeFormat("zh-TW", {
   timeZone: "Asia/Taipei",
 })
 
-// An admin makes a link for someone without a lab account. The link is the
+// A member makes a link for someone without a lab account. The link is the
 // password, so it is shown once and copied; it cannot be shown again.
 export function GuestInvite({
   open,
