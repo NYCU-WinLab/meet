@@ -42,7 +42,7 @@ export function Room({
   token,
   endsAt,
   host,
-  admin = false,
+  invite = false,
   guest = false,
   onLeave,
 }: {
@@ -52,8 +52,8 @@ export function Room({
   endsAt: Date | null
   /** Whether this member opened the room and may moderate it. */
   host: boolean
-  /** Whether this member may make guest links. */
-  admin?: boolean
+  /** Whether this person may make guest links: every member. */
+  invite?: boolean
   /** A person without an account, in through a guest link. */
   guest?: boolean
   /** Where leaving goes; the room list when left out. */
@@ -67,7 +67,7 @@ export function Room({
         token={token}
         endsAt={endsAt}
         host={host}
-        admin={admin}
+        invite={invite}
         guest={guest}
         onLeave={onLeave}
         choices={joined}

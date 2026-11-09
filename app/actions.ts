@@ -6,7 +6,11 @@ import {
   endRoom,
   moderateParticipant,
 } from "@/lib/actions/rooms"
-import { createGuestLink, joinAsGuest } from "@/lib/actions/guests"
+import {
+  createGuestLink,
+  joinAsGuest,
+  revokeGuestLink,
+} from "@/lib/actions/guests"
 import { requireActor } from "@/lib/auth/session"
 
 // The writes a page makes, each one an action run as the signed-in member.
@@ -81,6 +85,16 @@ export async function joinAsGuestAction(secret: string, name: string) {
         { secret, name }
       ),
     }
+  } catch (error) {
+    return { ok: false as const, error: errorMessage(error) }
+  }
+}
+
+export async function revokeGuestLinkAction(id: string) {
+  const actor = await requireActor("/guests")
+  try {
+    await runAction(revokeGuestLink, actor, { id })
+    return { ok: true as const }
   } catch (error) {
     return { ok: false as const, error: errorMessage(error) }
   }

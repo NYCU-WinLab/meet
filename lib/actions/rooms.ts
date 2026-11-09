@@ -326,8 +326,6 @@ export type JoinState =
       endsAt: Date | null
       /** Whether this member opened the room and may moderate it. */
       host?: boolean
-      /** Whether this member may make guest links. */
-      admin?: boolean
     }
   | { state: "early"; title: string; opensAt: Date; startsAt: Date }
   | { state: "ended"; title: string }
@@ -425,7 +423,6 @@ export const joinRoom = defineAction({
       title,
       endsAt,
       host,
-      admin: isAdmin(me.username),
       ...credentials,
     }
   },
@@ -433,8 +430,8 @@ export const joinRoom = defineAction({
     "It mints a browser credential; an agent joins a room with its own LiveKit token, not a member's.",
 })
 
-/** Admins may let people without a lab account in (guest links). They
- * are the usernames in MEET_ADMINS, comma separated. */
+/** Admins see every member's guest links, who made them and who came in
+ * through them. They are the usernames in MEET_ADMINS, comma separated. */
 export function isAdmin(username: string | null) {
   if (!username) return false
   const admins = (process.env.MEET_ADMINS ?? "")
