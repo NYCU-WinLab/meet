@@ -71,6 +71,13 @@
       "when": 1794186617131,
       "tag": "0009_spicy_kronos",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1794187015518,
+      "tag": "0010_fancy_cardiac",
+      "breakpoints": true
     }
   ]
 }
