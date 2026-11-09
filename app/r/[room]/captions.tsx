@@ -5,6 +5,11 @@ import { CaptionsIcon, CaptionsOffIcon } from "lucide-react"
 import * as React from "react"
 
 import { Button } from "@/components/ui/button"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 import { fromSummary } from "@/lib/participants"
 
 // Captions: the summary service sends each transcribed chunk on a text
@@ -49,15 +54,22 @@ export const useCaptions = () => React.useContext(CaptionsContext)
 export function CaptionsControl() {
   const { on, toggle } = useCaptions()
   return (
-    <Button
-      variant={on ? "default" : "outline"}
-      size="icon"
-      aria-label={on ? "關閉字幕" : "字幕"}
-      aria-pressed={on}
-      onClick={toggle}
-    >
-      {on ? <CaptionsIcon /> : <CaptionsOffIcon />}
-    </Button>
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            variant={on ? "default" : "outline"}
+            size="icon"
+            aria-label={on ? "關閉字幕" : "字幕"}
+            aria-pressed={on}
+            onClick={toggle}
+          />
+        }
+      >
+        {on ? <CaptionsIcon /> : <CaptionsOffIcon />}
+      </TooltipTrigger>
+      <TooltipContent>{on ? "關閉字幕" : "字幕"}</TooltipContent>
+    </Tooltip>
   )
 }
 

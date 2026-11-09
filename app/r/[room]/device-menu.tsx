@@ -16,6 +16,11 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 
 // Speakers can be picked only where the browser can route audio (not Safari
 // before 18, not Firefox without a flag).
@@ -43,18 +48,25 @@ export function DeviceMenu({
   useFallbackNotice(kind, label)
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger
-        render={
-          <Button
-            variant="ghost"
-            size="icon"
-            className="w-6"
-            aria-label={`選擇${label}`}
-          />
-        }
-      >
-        <ChevronDownIcon />
-      </DropdownMenuTrigger>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <DropdownMenuTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="w-6"
+                  aria-label={`選擇${label}`}
+                />
+              }
+            />
+          }
+        >
+          <ChevronDownIcon />
+        </TooltipTrigger>
+        <TooltipContent>{`選擇${label}`}</TooltipContent>
+      </Tooltip>
       <DropdownMenuContent align="end" className="max-w-80">
         <DeviceGroup kind={kind} label={label} />
         {output && (

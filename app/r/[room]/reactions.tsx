@@ -12,6 +12,11 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 
 // Emoji reactions: a quick 👍 without unmuting or typing. They travel on
 // the data channel, are never stored, and float up over the sender's tile.
@@ -134,11 +139,20 @@ export function ReactionPicker() {
   }
   return (
     <Popover>
-      <PopoverTrigger
-        render={<Button variant="outline" size="icon" aria-label="表情反應" />}
-      >
-        <SmilePlusIcon />
-      </PopoverTrigger>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <PopoverTrigger
+              render={
+                <Button variant="outline" size="icon" aria-label="表情反應" />
+              }
+            />
+          }
+        >
+          <SmilePlusIcon />
+        </TooltipTrigger>
+        <TooltipContent>表情反應</TooltipContent>
+      </Tooltip>
       <PopoverContent className="flex w-auto gap-1 p-1">
         {REACTIONS.map((emoji) => (
           <Button
