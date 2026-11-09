@@ -22,6 +22,9 @@ import { getRoom, joinToken, parseMetadata, unstamp } from "@/lib/livekit"
 /** How long a link may work, in hours: an hour, a day or a week. */
 export const GUEST_HOURS = [1, 24, 168] as const
 
+/** How long a guest's token may be used to join: long enough for the lobby. */
+const GUEST_TOKEN_SECONDS = 10 * 60
+
 const secretOf = z.string().regex(/^[A-Za-z0-9_-]{43}$/, "這個訪客連結無效")
 const hash = (secret: string) =>
   createHash("sha256").update(secret).digest("hex")
@@ -202,6 +205,16 @@ export const joinAsGuest = defineAction({
       identity: `guest-${link.id.slice(0, 8)}-${suffix}`,
       name: `${input.name}（訪客）`,
       guest: true,
+      // LiveKit cannot ask whether the link still works, so the token is
+      // short and never outlives the link: a revoked or expired link stops
+      // new joins within minutes.
+      ttlSeconds: Math.max(
+        1,
+        Math.min(
+          GUEST_TOKEN_SECONDS,
+          Math.floor((link.expiresAt.getTime() - Date.now()) / 1000)
+        )
+      ),
     })
     return { state: "ready", title, endsAt, ...credentials }
   },

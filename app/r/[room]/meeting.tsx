@@ -72,6 +72,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
+import { SUMMARY_IDENTITY } from "@/lib/participants"
 
 import {
   Captions,
@@ -966,7 +967,9 @@ function SummaryListener({
 }) {
   const room = useRoomContext()
   React.useEffect(() => {
-    room.registerTextStreamHandler("meet.summary", async (reader) => {
+    room.registerTextStreamHandler("meet.summary", async (reader, from) => {
+      // Only the summary service writes the summary.
+      if (from.identity !== SUMMARY_IDENTITY) return
       try {
         onSummary(JSON.parse(await reader.readAll()) as Summary)
       } catch {
