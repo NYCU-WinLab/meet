@@ -11,7 +11,20 @@ export const gitlabConfigured = () => Boolean(process.env.GITLAB_API_TOKEN)
 
 type Epic = { web_url: string; description: string | null; state: string }
 
+// GitLab answers 429 when a page asks for many records at once. Until the
+// time it names in Retry-After (60 s when it names none), no search goes out
+// and the record reads as not found yet, which the page already shows.
+class GitlabBusy extends Error {}
+let pausedUntil = 0
+
+// A found record keeps its URL for a day; a miss is asked again after 5
+// minutes, since winlab-helper files the record after the meeting.
+const FOUND_MS = 86_400_000
+const MISS_MS = 5 * 60_000
+const cache = new Map<string, { url: string | null; until: number }>()
+
 async function searchEpics(search: string, since?: Date) {
+  if (Date.now() < pausedUntil) throw new GitlabBusy()
   const token = process.env.GITLAB_API_TOKEN ?? ""
   const query = new URLSearchParams({
     search,
@@ -28,6 +41,11 @@ async function searchEpics(search: string, since?: Date) {
       signal: AbortSignal.timeout(8000),
     }
   )
+  if (response.status === 429) {
+    const wait = Number(response.headers.get("retry-after"))
+    pausedUntil = Date.now() + (wait > 0 ? wait : 60) * 1000
+    throw new GitlabBusy()
+  }
   if (!response.ok) throw new Error(`GitLab ${response.status}`)
   return (await response.json()) as Epic[]
 }
@@ -42,6 +60,25 @@ export async function recordUrl(
   recording?: { fileName: string; title: string; since: Date }
 ) {
   if (!gitlabConfigured()) return null
+  const id = JSON.stringify([keys, recording?.fileName ?? null])
+  const hit = cache.get(id)
+  if (hit && hit.until > Date.now()) return hit.url
+  let url: string | null
+  try {
+    url = await findRecord(keys, recording)
+  } catch (error) {
+    if (error instanceof GitlabBusy) return null
+    throw error
+  }
+  if (cache.size > 1000) cache.clear()
+  cache.set(id, { url, until: Date.now() + (url ? FOUND_MS : MISS_MS) })
+  return url
+}
+
+async function findRecord(
+  keys: string[],
+  recording?: { fileName: string; title: string; since: Date }
+) {
   for (const key of keys) {
     const marker = `request="${key}"`
     const found = (await searchEpics(key)).find((e) =>
