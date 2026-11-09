@@ -95,7 +95,7 @@ export const listGuestLinks = defineAction({
   name: "list_guest_links",
   title: "訪客連結列表",
   description:
-    "Guest links, newest first (up to 200), including expired and revoked ones: id, room, title (the meeting's), label (who it is for), madeBy (the member's name), createdAt, expiresAt, revokedAt, active, and guests (each name typed on the way in, with joinedAt). Admins see every member's links; anyone else sees their own. admin says which. The links themselves cannot be shown again; make a new one if it is lost.",
+    "Guest links, newest first (up to 200), including expired and revoked ones: id, room, title (the meeting's), label (who it is for), madeBy (the member's name), createdAt, expiresAt, revokedAt, active, and guests (each name typed on the way in, with joinedAt; up to 50 per link, the same name within 10 minutes once). Admins see every member's links; anyone else sees their own. admin says which. The links themselves cannot be shown again; make a new one if it is lost.",
   kind: "query",
   input: z.object({ name: roomName.optional() }),
   run: async (actor, input) => {
@@ -176,6 +176,31 @@ export const revokeGuestLink = defineAction({
     return { revoked: true }
   },
 })
+
+/** Names kept per link: enough to see who came, bounded so a link holder
+ * asking for tokens over and over cannot grow the table or the list. */
+const JOINS_MAX = 50
+/** The same name again within this window is the same visit. */
+const SAME_VISIT_MS = 10 * 60 * 1000
+
+async function recordJoin(linkId: string, name: string) {
+  const recent = await db
+    .select({ name: guestJoin.name, joinedAt: guestJoin.joinedAt })
+    .from(guestJoin)
+    .where(eq(guestJoin.linkId, linkId))
+    .orderBy(desc(guestJoin.joinedAt))
+    .limit(JOINS_MAX)
+  if (recent.length >= JOINS_MAX) return
+  const now = Date.now()
+  if (
+    recent.some(
+      (join) =>
+        join.name === name && now - join.joinedAt.getTime() < SAME_VISIT_MS
+    )
+  )
+    return
+  await db.insert(guestJoin).values({ linkId, name })
+}
 
 /** The working link behind a secret, or null. */
 async function linkFor(secret: string) {
@@ -269,9 +294,11 @@ export const joinAsGuest = defineAction({
         )
       ),
     })
-    await db.insert(guestJoin).values({ linkId: link.id, name: input.name })
+    await recordJoin(link.id, input.name)
     return { state: "ready", title, endsAt, ...credentials }
   },
   mcpExcludedBecause:
     "It mints a browser credential for a person without an account.",
+  // Fetching a token is not news for every open page.
+  quiet: true,
 })
