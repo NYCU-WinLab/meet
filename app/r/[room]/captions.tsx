@@ -5,7 +5,7 @@ import { CaptionsIcon, CaptionsOffIcon } from "lucide-react"
 import * as React from "react"
 
 import { Button } from "@/components/ui/button"
-import { SUMMARY_IDENTITY } from "@/lib/participants"
+import { fromSummary } from "@/lib/participants"
 
 // Captions: the summary service sends each transcribed chunk on a text
 // topic as soon as it comes back. The bar over the stage shows the last 2
@@ -73,7 +73,7 @@ export function Captions() {
     room.registerTextStreamHandler(TOPIC, (reader, { identity }) => {
       // Only the summary service writes captions; anyone else could put
       // words in a member's mouth.
-      if (identity !== SUMMARY_IDENTITY) return
+      if (!fromSummary(identity)) return
       void reader
         .readAll()
         .then((raw) => {

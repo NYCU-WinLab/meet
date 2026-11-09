@@ -13,7 +13,7 @@ import remarkBreaks from "remark-breaks"
 import { Markdown } from "@/components/markdown"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { SUMMARY_IDENTITY } from "@/lib/participants"
+import { fromSummary } from "@/lib/participants"
 import { cn } from "@/lib/utils"
 
 // The meeting chat, laid out like Discord: a picture and a name on the
@@ -226,7 +226,7 @@ function senderOf(message: ReceivedChatMessage, me: string): Sender {
   // sender, guests included, has one.
   if (
     message.attributes?.["meet.agent"] === "1" &&
-    (!message.from || message.from.identity === SUMMARY_IDENTITY)
+    fromSummary(message.from?.identity)
   )
     return {
       key: "agent",
