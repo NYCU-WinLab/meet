@@ -1,6 +1,13 @@
 // A guest link lets someone without a lab account into one room until it
 // expires. The secret in the link is the password; only its hash is kept.
-import { index, pgTable, serial, text, timestamp } from "drizzle-orm/pg-core"
+import {
+  index,
+  pgTable,
+  serial,
+  text,
+  timestamp,
+  uuid,
+} from "drizzle-orm/pg-core"
 
 export const guestLink = pgTable(
   "guest_links",
@@ -15,7 +22,9 @@ export const guestLink = pgTable(
     /** Who the link is for, as its maker wrote it; may be empty. */
     label: text().notNull().default(""),
     /** The meet user id of the member who made it. */
-    createdBy: text().notNull(),
+    // No foreign key: a link and who came in through it stay on record
+    // even if the member's account is deleted.
+    createdBy: uuid().notNull(),
     expiresAt: timestamp({ withTimezone: true, mode: "date" }).notNull(),
     revokedAt: timestamp({ withTimezone: true, mode: "date" }),
     createdAt: timestamp({ withTimezone: true, mode: "date" })

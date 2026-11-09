@@ -1,0 +1,1 @@
+ALTER TABLE "guest_links" ALTER COLUMN "created_by" SET DATA TYPE uuid USING "created_by"::uuid;
