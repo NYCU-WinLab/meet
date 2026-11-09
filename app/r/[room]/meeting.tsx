@@ -242,7 +242,10 @@ function Stage() {
           className="min-h-0 flex-1"
         />
         {rest.length > 0 && (
-          <div className="flex gap-4 overflow-x-auto pb-1">
+          // A scroller clips on every side; the padding keeps the speaking
+          // ring around each tile visible, the negative margin keeps the
+          // tiles where they were.
+          <div className="-m-1 flex gap-4 overflow-x-auto p-1">
             {rest.map((trackRef) => (
               <Tile
                 key={tileKey(trackRef)}
