@@ -475,13 +475,16 @@ function Controls({
         <ReactionPicker />
         <div className="flex items-center gap-3 max-md:hidden">
           <CaptionsControl />
-          <Control
-            label={hand.up ? "放下手" : "舉手"}
-            active={!hand.up}
-            onClick={() => void hand.set(!hand.up)}
-          >
-            <HandIcon />
-          </Control>
+          {/* Raising a hand is an attribute a guest's token may not set. */}
+          {!guest && (
+            <Control
+              label={hand.up ? "放下手" : "舉手"}
+              active={!hand.up}
+              onClick={() => void hand.set(!hand.up)}
+            >
+              <HandIcon />
+            </Control>
+          )}
           <Divider />
         </div>
         <Control
@@ -629,10 +632,12 @@ function MoreMenu({
           <SwitchCameraIcon />
           切換鏡頭
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => void hand.set(!hand.up)}>
-          <HandIcon />
-          {hand.up ? "放下手" : "舉手"}
-        </DropdownMenuItem>
+        {!guest && (
+          <DropdownMenuItem onClick={() => void hand.set(!hand.up)}>
+            <HandIcon />
+            {hand.up ? "放下手" : "舉手"}
+          </DropdownMenuItem>
+        )}
         <DropdownMenuItem onClick={captions.toggle}>
           {captions.on ? <CaptionsOffIcon /> : <CaptionsIcon />}
           {captions.on ? "關閉字幕" : "字幕"}

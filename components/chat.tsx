@@ -13,6 +13,7 @@ import remarkBreaks from "remark-breaks"
 import { Markdown } from "@/components/markdown"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { SUMMARY_IDENTITY } from "@/lib/participants"
 import { cn } from "@/lib/utils"
 
 // The meeting chat, laid out like Discord: a picture and a name on the
@@ -219,7 +220,12 @@ type Sender = {
 
 function senderOf(message: ReceivedChatMessage, me: string): Sender {
   // The agent is hidden, so its replies carry a mark instead of a sender.
-  if (message.attributes?.["meet.agent"] === "1")
+  // Only the summary service may carry the mark; anyone else could pass a
+  // made-up answer off as the agent's.
+  if (
+    message.attributes?.["meet.agent"] === "1" &&
+    message.from?.identity === SUMMARY_IDENTITY
+  )
     return {
       key: "agent",
       identity: null,

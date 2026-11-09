@@ -173,11 +173,18 @@ export const joinAsGuest = defineAction({
   name: "join_as_guest",
   title: "訪客加入",
   description:
-    "For the guest page: a LiveKit token for a person without an account to join the room their guest link opens, shown as their name with （訪客）.",
+    "For the guest page: a LiveKit token for a person without an account to join the room their guest link opens, shown as 訪客 followed by their name.",
   kind: "query",
   input: z.object({
     secret: secretOf,
-    name: z.string().trim().min(1, "請填名字").max(40, "名字最多 40 字"),
+    // Blank and invisible characters collapse to one space, so a padded
+    // name cannot push the guest marker out of sight.
+    name: z
+      .string()
+      .transform((name) =>
+        name.replace(/[\p{Z}\p{C}\u115F\u1160\u3164\uFFA0\s]+/gu, " ").trim()
+      )
+      .pipe(z.string().min(1, "請填名字").max(40, "名字最多 40 字")),
   }),
   run: async (_actor, input): Promise<JoinState> => {
     const link = await linkFor(input.secret)
@@ -203,7 +210,8 @@ export const joinAsGuest = defineAction({
     const credentials = await joinToken({
       room: link.room,
       identity: `guest-${link.id.slice(0, 8)}-${suffix}`,
-      name: `${input.name}（訪客）`,
+      // The marker comes first: a narrow tile cuts names from the end.
+      name: `訪客 ${input.name}`,
       guest: true,
       // LiveKit cannot ask whether the link still works, so the token is
       // short and never outlives the link: a revoked or expired link stops
