@@ -28,6 +28,7 @@ import {
 } from "./summarize.js"
 import { RoomMics } from "./room-mic.js"
 import { transcribeChunk } from "./transcribe.js"
+import { keepSummary } from "./usage.js"
 
 const url = need("LIVEKIT_URL")
 const apiKey = need("LIVEKIT_API_KEY")
@@ -79,6 +80,8 @@ type Line = {
 type Meeting = {
   room: Room
   name: string
+  /** When the service joined; with the name it keys the kept summary. */
+  joinedAt: number
   /** The room's title and project group, as meet wrote them. */
   title: string
   group: string
@@ -134,6 +137,7 @@ const isMember = (p: { kind?: number; permission?: { hidden?: boolean } }) =>
   (p.kind === 0 || p.kind === undefined) && !p.permission?.hidden
 
 function leave(meeting: Meeting) {
+  keep(meeting)
   clearInterval(meeting.timer)
   joined.delete(meeting.name)
   void meeting.room.disconnect()
@@ -201,6 +205,7 @@ async function join(name: string, metadata: string) {
   const meeting: Meeting = {
     room,
     name,
+    joinedAt: Date.now(),
     ...contextOf(metadata),
     lines: [],
     seen: 0,
@@ -260,6 +265,8 @@ async function join(name: string, metadata: string) {
   })
   room.on(RoomEvent.Disconnected, () => {
     log(name, "disconnected")
+    // The room ended under us: leave() did not run, so keep it here.
+    if (joined.get(name) === meeting) keep(meeting)
     clearInterval(meeting.timer)
     joined.delete(name)
   })
@@ -389,6 +396,7 @@ async function refresh(meeting: Meeting) {
     meeting.seen += fresh.length
     meeting.summary = next
     more = meeting.seen < meeting.lines.length && joined.has(meeting.name)
+    keep(meeting)
     await publish(meeting)
   } catch (error) {
     log(meeting.name, "summarize failed", error)
@@ -396,6 +404,13 @@ async function refresh(meeting: Meeting) {
     meeting.summarizing = false
   }
   if (more) void refresh(meeting)
+}
+
+// Saves the summary and the lines in meet, once anything was heard.
+function keep(meeting: Meeting) {
+  if (meeting.lines.length === 0) return
+  const lines = [...meeting.lines].sort((a, b) => a.at - b.at)
+  keepSummary(meeting.name, meeting.joinedAt, meeting.summary, lines)
 }
 
 // Nothing to show yet: no words heard and no agenda.
