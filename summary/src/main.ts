@@ -26,6 +26,7 @@ import {
   type AgendaState,
   type Summary,
 } from "./summarize.js"
+import { RoomMics } from "./room-mic.js"
 import { transcribeChunk } from "./transcribe.js"
 
 const url = need("LIVEKIT_URL")
@@ -34,7 +35,7 @@ const apiSecret = need("LIVEKIT_API_SECRET")
 const identity = process.env.SUMMARY_IDENTITY ?? "summary"
 const pollMs = Number(process.env.POLL_MS ?? 5000)
 /** How much of each microphone goes to transcribe at a time. */
-const chunkMs = Number(process.env.SUMMARY_CHUNK_MS ?? 60000)
+const chunkMs = Number(process.env.SUMMARY_CHUNK_MS ?? 30000)
 /** How often the summary is rewritten when there is something new. */
 const summaryMs = Number(process.env.SUMMARY_EVERY_MS ?? 45000)
 /** The most lines one rewrite reads; a backlog is folded in batch by batch. */
@@ -49,8 +50,6 @@ const MENTION = /@agent\b/i
 // The meeting page names a chat message carrying this attribute "agent":
 // the agent is hidden, so the page cannot look its name up.
 const AGENT_ATTRIBUTE = "meet.agent"
-/** Set by a member whose microphone several people in one room share. */
-const ROOM_MIC_ATTRIBUTE = "meet.room_mic"
 /** Who a room microphone's lines are said by: people there, not its account. */
 const ROOM = "會議室"
 
@@ -63,7 +62,13 @@ function need(name: string) {
 export const log = (...parts: unknown[]) =>
   console.log(new Date().toISOString(), ...parts)
 
-type Line = { at: number; who: string; text: string }
+type Line = {
+  at: number
+  who: string
+  text: string
+  /** The microphone's participant; chat lines have none. */
+  identity?: string
+}
 
 type Meeting = {
   room: Room
@@ -74,6 +79,8 @@ type Meeting = {
   seen: number
   summary: Summary
   summarizing: boolean
+  /** Microphones found to be shared by several people in one room. */
+  roomMics: RoomMics
   /** An @agent question is being answered; one at a time per room. */
   answering: boolean
   timer: ReturnType<typeof setInterval>
@@ -156,6 +163,7 @@ async function join(name: string, agenda: AgendaState[]) {
     seen: 0,
     summary: initial(agenda),
     summarizing: false,
+    roomMics: new RoomMics(),
     answering: false,
     timer: setInterval(() => void refresh(meeting), summaryMs),
   }
@@ -251,13 +259,27 @@ async function listen(
     bytes = 0
     startedAt = Date.now()
     void transcribeChunk(chunk, SAMPLE_RATE)
-      .then((text) => {
+      .then(({ text, speakers }) => {
         if (!text) return
-        // Read at each chunk: the switch can change mid-meeting.
-        const said =
-          participant.attributes[ROOM_MIC_ATTRIBUTE] === "1" ? ROOM : who
-        meeting.lines.push({ at, who: said, text })
-        log(meeting.name, who, "heard", text.length, "chars")
+        const identity = participant.identity
+        if (meeting.roomMics.observe(identity, speakers)) {
+          // Lines heard before it was found are the room's too.
+          for (const line of meeting.lines)
+            if (line.identity === identity) line.who = ROOM
+          log(meeting.name, who, "is a room microphone")
+        }
+        const said = meeting.roomMics.has(identity) ? ROOM : who
+        meeting.lines.push({ at, who: said, text, identity })
+        log(
+          meeting.name,
+          who,
+          "heard",
+          text.length,
+          "chars",
+          speakers,
+          "speakers as",
+          said
+        )
         void caption(meeting, participant.identity, said, text, at)
       })
       .catch((error) => log(meeting.name, who, "transcribe failed", error))

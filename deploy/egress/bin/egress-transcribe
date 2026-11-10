@@ -33,13 +33,18 @@ for key, label in labels:
     out += [f"## {label}", ""]
     for item in items:
         if isinstance(item, dict):
-            head = item.get("topic") or item.get("text") or item.get("title") or item.get("item") or item.get("name")
-            body = item.get("summary") or item.get("detail") or item.get("description")
+            # student_updates: {student, progress, blockers}; the others name
+            # the thing in topic/text/... and who does it in owner/assignee.
+            head = (item.get("topic") or item.get("text") or item.get("title") or item.get("item")
+                    or item.get("name") or item.get("student"))
+            body = item.get("summary") or item.get("detail") or item.get("description") or item.get("progress")
             if not head and not body:
                 head = json.dumps(item, ensure_ascii=False)
             text = f"{head}：{body}" if head and body else (head or body)
-            who = item.get("owner") or item.get("assignee") or item.get("student")
-            text = f"{text}({who})" if who else text
+            if item.get("blockers"):
+                text = f"{text}。卡關：{item['blockers']}"
+            who = item.get("owner") or item.get("assignee")
+            text = f"{text}({who})" if who and who != head else text
             if item.get("timestamp"):
                 text = f"{item['timestamp']} {text}"
         else:

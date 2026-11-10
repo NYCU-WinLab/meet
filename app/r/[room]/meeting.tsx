@@ -19,7 +19,6 @@ import {
   ConnectionQuality,
   ConnectionState,
   DisconnectReason,
-  ParticipantEvent,
   Room,
   Track,
   type RoomOptions,
@@ -46,7 +45,6 @@ import {
   SignalLowIcon,
   SwitchCameraIcon,
   UserPlusIcon,
-  UsersRoundIcon,
   VideoIcon,
   VideoOffIcon,
 } from "lucide-react"
@@ -176,7 +174,6 @@ export function Meeting({
           <ReactionListener />
           <LowerHandWhenSpeaking />
           <Shortcuts />
-          {!guest && <RestoreRoomMic />}
           <Reconnecting />
           {/* A phone shows the open panel instead of the stage; wider screens show both. */}
           <div
@@ -403,7 +400,6 @@ function Controls({
     useLocalParticipant()
   const mic = useTrackToggle({ source: Track.Source.Microphone })
   const camera = useTrackToggle({ source: Track.Source.Camera })
-  const roomMic = useRoomMic()
   const hand = useMyHand()
   const [inviting, setInviting] = React.useState(false)
   const wasSharing = React.useRef(false)
@@ -457,15 +453,6 @@ function Controls({
           </span>
         </div>
         <div className="flex items-center gap-3 max-md:hidden">
-          {!guest && (
-            <Control
-              label={roomMic.on ? "關閉會議室收音" : "會議室收音"}
-              active={roomMic.on}
-              onClick={() => void roomMic.set(!roomMic.on)}
-            >
-              <UsersRoundIcon />
-            </Control>
-          )}
           <Control
             label={isScreenShareEnabled ? "停止分享螢幕" : "分享螢幕"}
             active={isScreenShareEnabled}
@@ -502,7 +489,6 @@ function Controls({
           <MessagesSquareIcon />
         </Control>
         <MoreMenu
-          roomMic={roomMic}
           hand={hand}
           sharing={isScreenShareEnabled}
           onShare={() => screen.toggle()}
@@ -576,14 +562,12 @@ const copyLink = async () => {
 // A phone has room for the main controls only (mic, camera, reactions, the
 // panel, leave); the rest sit in this menu. Wider screens never show it.
 function MoreMenu({
-  roomMic,
   hand,
   sharing,
   onShare,
   guest,
   onInvite,
 }: {
-  roomMic: ReturnType<typeof useRoomMic>
   hand: ReturnType<typeof useMyHand>
   sharing: boolean
   onShare: () => void
@@ -645,12 +629,6 @@ function MoreMenu({
           {captions.on ? <CaptionsOffIcon /> : <CaptionsIcon />}
           {captions.on ? "關閉字幕" : "字幕"}
         </DropdownMenuItem>
-        {!guest && (
-          <DropdownMenuItem onClick={() => void roomMic.set(!roomMic.on)}>
-            <UsersRoundIcon />
-            {roomMic.on ? "關閉會議室收音" : "會議室收音"}
-          </DropdownMenuItem>
-        )}
         {canShare && (
           <DropdownMenuItem onClick={onShare}>
             {sharing ? <MonitorXIcon /> : <MonitorUpIcon />}
@@ -672,63 +650,6 @@ function MoreMenu({
       </DropdownMenuContent>
     </DropdownMenu>
   )
-}
-
-// Room microphone: several people in one room share this microphone, so the
-// summary says "會議室" for what it hears instead of this member's name. It is
-// a participant attribute the summary service reads, and this browser
-// remembers it for the next meeting.
-const ROOM_MIC_ATTRIBUTE = "meet.room_mic"
-const ROOM_MIC_KEY = "meet.room-mic"
-
-function useRoomMic() {
-  const { localParticipant } = useLocalParticipant()
-  const [on, setOn] = React.useState(false)
-  React.useEffect(() => {
-    const sync = () =>
-      setOn(localParticipant.attributes[ROOM_MIC_ATTRIBUTE] === "1")
-    sync()
-    localParticipant.on(ParticipantEvent.AttributesChanged, sync)
-    return () => {
-      localParticipant.off(ParticipantEvent.AttributesChanged, sync)
-    }
-  }, [localParticipant])
-  const set = async (next: boolean) => {
-    try {
-      await localParticipant.setAttributes({
-        [ROOM_MIC_ATTRIBUTE]: next ? "1" : "",
-      })
-    } catch {
-      toast.error("切換會議室收音失敗，請再試一次")
-      return
-    }
-    try {
-      localStorage.setItem(ROOM_MIC_KEY, next ? "1" : "")
-    } catch {}
-    toast(next ? "已開啟會議室收音" : "已關閉會議室收音")
-  }
-  return { on, set }
-}
-
-// Turns the room microphone back on once connected, if this browser had it.
-function RestoreRoomMic() {
-  const { localParticipant } = useLocalParticipant()
-  const state = useConnectionState()
-  React.useEffect(() => {
-    if (state !== ConnectionState.Connected) return
-    let saved = ""
-    try {
-      saved = localStorage.getItem(ROOM_MIC_KEY) ?? ""
-    } catch {}
-    if (
-      saved === "1" &&
-      localParticipant.attributes[ROOM_MIC_ATTRIBUTE] !== "1"
-    )
-      void localParticipant
-        .setAttributes({ [ROOM_MIC_ATTRIBUTE]: "1" })
-        .catch(() => {})
-  }, [state, localParticipant])
-  return null
 }
 
 const isSafari = () =>
