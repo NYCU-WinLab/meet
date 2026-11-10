@@ -132,6 +132,7 @@ JSON 欄位：
 6. 說話者後面標「（聊天）」的是會議聊天室打的字，不是語音；和口說內容一樣算進摘要與議程。
 7. 只寫和會議主題有關的事；分享螢幕、連線、誰聽不到等會議操作不寫。
 8. 說話者是「會議室」的，是同一個會議室裡多個人共用一支麥克風說的話，分不出是誰。
+9. 請求裡若附「會議用詞」，那是這場會議的人名與專有名詞。逐字稿裡讀音相近的詞（例如 my agent 與 MaiAgent），一律照會議用詞的寫法寫。
 
 ## 任務二：回答提問
 
@@ -153,16 +154,22 @@ JSON 欄位：
 - 同一個東西從頭到尾用同一個名字。
 - 全文繁體中文；專有名詞、程式名稱、英文縮寫保留原文。`
 
+/** The glossary line of a request, or "" without one. */
+const glossaryOf = (words: string[]) =>
+  words.length > 0 ? `會議用詞：${words.join("、")}\n\n` : ""
+
 export async function summarize(
   current: Summary,
   fresh: { at: number; who: string; text: string }[],
-  room: string
+  room: string,
+  /** Names and terms of this meeting, spelled right. */
+  glossary: string[] = []
 ): Promise<Summary> {
   const data = await call(
     [
       {
         role: "user",
-        content: `任務：改寫摘要\n\n目前的摘要狀態：\n${JSON.stringify(stateOf(current))}\n\n這之後新說的話：\n${transcript(fresh)}`,
+        content: `任務：改寫摘要\n\n${glossaryOf(glossary)}目前的摘要狀態：\n${JSON.stringify(stateOf(current))}\n\n這之後新說的話：\n${transcript(fresh)}`,
       },
     ],
     // The summary never searches; the tool is listed only to keep the
@@ -322,13 +329,14 @@ export async function answer(
   room: string,
   /** The meet user ids of everyone in the room: search_meetings finds only
    * meetings all of them may open, since the whole room reads the answer. */
-  members: string[]
+  members: string[],
+  glossary: string[] = []
 ): Promise<string> {
   const recent = [...lines].sort((a, b) => a.at - b.at).slice(-QUESTION_LINES)
   const messages: { role: "user" | "assistant"; content: unknown }[] = [
     {
       role: "user",
-      content: `任務：回答提問\n\n目前的摘要狀態：\n${JSON.stringify(stateOf(current))}\n\n最近的逐字稿：\n${transcript(recent) || "（還沒有人說話）"}\n\n${who} 問：${question}`,
+      content: `任務：回答提問\n\n${glossaryOf(glossary)}目前的摘要狀態：\n${JSON.stringify(stateOf(current))}\n\n最近的逐字稿：\n${transcript(recent) || "（還沒有人說話）"}\n\n${who} 問：${question}`,
     },
   ]
   let data = await call(messages, { type: "auto" })

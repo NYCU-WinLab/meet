@@ -38,6 +38,12 @@ const pollMs = Number(process.env.POLL_MS ?? 5000)
 const chunkMs = Number(process.env.SUMMARY_CHUNK_MS ?? 30000)
 /** How often the summary is rewritten when there is something new. */
 const summaryMs = Number(process.env.SUMMARY_EVERY_MS ?? 45000)
+/** Names and terms of the lab, comma separated, that every meeting may use:
+ * recent members, products, papers. Speech recognition misspells them. */
+const labWords = (process.env.SUMMARY_GLOSSARY ?? "")
+  .split(/[,，、\n]/)
+  .map((word) => word.trim())
+  .filter(Boolean)
 /** The most lines one rewrite reads; a backlog is folded in batch by batch. */
 const batchLines = Number(process.env.SUMMARY_BATCH_LINES ?? 40)
 
@@ -73,6 +79,9 @@ type Line = {
 type Meeting = {
   room: Room
   name: string
+  /** The room's title and project group, as meet wrote them. */
+  title: string
+  group: string
   /** Everything heard so far, in the order chunks came back. */
   lines: Line[]
   /** How many lines the summary has seen. */
@@ -110,7 +119,7 @@ async function poll() {
     if (room.numParticipants === 0 || joined.has(room.name)) continue
     try {
       const people = await rooms.listParticipants(room.name)
-      if (people.some(isMember)) void join(room.name, agendaOf(room.metadata))
+      if (people.some(isMember)) void join(room.name, room.metadata)
     } catch (error) {
       log(room.name, "listParticipants failed", error)
     }
@@ -128,6 +137,38 @@ function leave(meeting: Meeting) {
   clearInterval(meeting.timer)
   joined.delete(meeting.name)
   void meeting.room.disconnect()
+}
+
+// The title and project group meet put in the room's metadata.
+function contextOf(raw: string) {
+  try {
+    const data = JSON.parse(raw) as { title?: unknown; group?: unknown }
+    return {
+      title: typeof data.title === "string" ? data.title : "",
+      group: typeof data.group === "string" ? data.group : "",
+    }
+  } catch {
+    return { title: "", group: "" }
+  }
+}
+
+// The words this meeting's transcript should spell right: the lab's own,
+// the room's title, group and agenda, and the names of everyone in it.
+function glossaryOf(meeting: Meeting): string[] {
+  const names = [...meeting.room.remoteParticipants.values()]
+    .filter((p) => p.kind === ParticipantKind.STANDARD)
+    .map((p) => (p.name || "").replace(/^訪客\s*/, ""))
+  const words = [
+    ...names,
+    meeting.title,
+    meeting.group,
+    ...meeting.summary.agenda.map((item) => item.text),
+    ...labWords,
+  ]
+  return [...new Set(words.map((word) => word.trim()).filter(Boolean))].slice(
+    0,
+    120
+  )
 }
 
 // The agenda meet put in the room's metadata, all items pending.
@@ -154,11 +195,13 @@ function agendaOf(raw: string): AgendaState[] {
   }
 }
 
-async function join(name: string, agenda: AgendaState[]) {
+async function join(name: string, metadata: string) {
+  const agenda = agendaOf(metadata)
   const room = new Room()
   const meeting: Meeting = {
     room,
     name,
+    ...contextOf(metadata),
     lines: [],
     seen: 0,
     summary: initial(agenda),
@@ -337,7 +380,12 @@ async function refresh(meeting: Meeting) {
   meeting.summarizing = true
   let more = false
   try {
-    const next = await summarize(meeting.summary, fresh, meeting.name)
+    const next = await summarize(
+      meeting.summary,
+      fresh,
+      meeting.name,
+      glossaryOf(meeting)
+    )
     meeting.seen += fresh.length
     meeting.summary = next
     more = meeting.seen < meeting.lines.length && joined.has(meeting.name)
@@ -379,7 +427,8 @@ async function ask(meeting: Meeting, who: string, said: string) {
       // Everyone who reads the answer, read when it is asked.
       [...meeting.room.remoteParticipants.values()]
         .filter((p) => p.kind === ParticipantKind.STANDARD)
-        .map((p) => p.identity)
+        .map((p) => p.identity),
+      glossaryOf(meeting)
     )
     await reply(text)
     meeting.lines.push({ at: Date.now(), who: "agent（聊天）", text })
