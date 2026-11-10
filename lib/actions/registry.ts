@@ -18,7 +18,10 @@ import {
   revokeGuestLink,
 } from "@/lib/actions/guests"
 import { recordAiUsage } from "@/lib/actions/ai-usage"
-import { saveLiveSummary } from "@/lib/actions/live-summaries"
+import {
+  matchRecordingSpeakers,
+  saveLiveSummary,
+} from "@/lib/actions/live-summaries"
 import { dashboard } from "@/lib/actions/dashboard"
 import {
   fileRecording,
@@ -51,6 +54,7 @@ export const actions: Action[] = [
   dashboard,
   recordAiUsage,
   saveLiveSummary,
+  matchRecordingSpeakers,
   recordingGaps,
   fileRecording,
   listMyRecordings,
