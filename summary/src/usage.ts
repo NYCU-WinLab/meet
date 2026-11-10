@@ -54,3 +54,38 @@ export function reportUsage(
       )
     )
 }
+
+/**
+ * Keeps the meeting's running summary and every line heard in meet, so the
+ * recording page can show it after the meeting. Sent after each rewrite and
+ * when the service leaves; a failure is logged and the next one replaces it.
+ */
+export function keepSummary(
+  room: string,
+  startedAt: number,
+  summary: unknown,
+  lines: { at: number; who: string; text: string }[]
+) {
+  if (!key) return
+  void fetch(`${meetUrl}/api/actions/save_live_summary`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${key}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      room,
+      startedAt: new Date(startedAt).toISOString(),
+      summary,
+      lines: lines.map(({ at, who, text }) => ({ at, who, text })),
+    }),
+    signal: AbortSignal.timeout(15_000),
+  })
+    .then((response) => {
+      if (!response.ok)
+        console.log(new Date().toISOString(), room, "keep", response.status)
+    })
+    .catch((error) =>
+      console.log(new Date().toISOString(), room, "keep failed", String(error))
+    )
+}

@@ -1,9 +1,21 @@
-import { and, asc, desc, eq, ilike, inArray, lte, or, sql } from "drizzle-orm"
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gte,
+  ilike,
+  inArray,
+  lte,
+  or,
+  sql,
+} from "drizzle-orm"
 import { z } from "zod"
 
 import { defineAction, type Actor } from "@/lib/actions/define"
 import { db } from "@/lib/db"
 import {
+  liveSummary,
   livekitEvent,
   recording,
   transcriptIndex,
@@ -411,12 +423,12 @@ export const getRecording = defineAction({
   name: "get_recording",
   title: "會議紀錄",
   description:
-    "One of the member's recordings (id from list_my_recordings): title, group, opener, times, the files in its folder (MP4, transcript .txt, subtitles .srt, notes .notes.md) with sizes, the notes as Markdown (null until transcribed), and the GitLab meeting record's URL (null until winlab-helper filed it). Download a file on the page at /api/recordings/<id>/<file name>.",
+    "One of the member's recordings (id from list_my_recordings): title, group, opener, times, the files in its folder (MP4, transcript .txt, subtitles .srt, notes .notes.md) with sizes, the notes as Markdown (null until transcribed), the GitLab meeting record's URL (null until winlab-helper filed it), and liveSummary: the running summary from the meeting with every line heard and who said it (null when the summary service kept none). Download a file on the page at /api/recordings/<id>/<file name>.",
   kind: "query",
   input: z.object({ id }),
   async run(actor, { id: recordingId }) {
     const rec = await mine(actor, recordingId)
-    const [files, notes, gitlab] = await Promise.all([
+    const [files, notes, gitlab, live] = await Promise.all([
       nextcloudConfigured()
         ? folderFiles(rec.folder).catch((error) => {
             emitErrorLog(error, { source: "nextcloud folder" })
@@ -435,6 +447,7 @@ export const getRecording = defineAction({
             return null
           })
         : null,
+      liveSummaryOf(rec),
     ])
     return {
       id: rec.id,
@@ -447,9 +460,33 @@ export const getRecording = defineAction({
       files,
       notes,
       gitlab,
+      liveSummary: live,
     }
   },
 })
+
+// The running summary the summary service kept for this recording's room:
+// the last one it saved for a stay that began before the recording ended
+// and was still updating after it started.
+async function liveSummaryOf(rec: typeof recording.$inferSelect) {
+  const [row] = await db
+    .select({
+      summary: liveSummary.summary,
+      lines: liveSummary.lines,
+      updatedAt: liveSummary.updatedAt,
+    })
+    .from(liveSummary)
+    .where(
+      and(
+        eq(liveSummary.room, rec.room),
+        lte(liveSummary.startedAt, rec.endedAt),
+        gte(liveSummary.updatedAt, rec.startedAt)
+      )
+    )
+    .orderBy(desc(liveSummary.updatedAt))
+    .limit(1)
+  return row ?? null
+}
 
 export const recordingFile = defineAction({
   name: "recording_file",

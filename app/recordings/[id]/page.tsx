@@ -30,6 +30,42 @@ const kinds: [suffix: string, label: string][] = [
   [".srt", "字幕"],
 ]
 
+const agendaMark = { pending: "還沒談", partial: "談了一部分", done: "談完" }
+
+// The running summary from the meeting as Markdown: what it was about, then
+// each list it kept, then the agenda with how far each item got.
+function liveMarkdown(summary: Record<string, unknown>) {
+  const list = (value: unknown) =>
+    Array.isArray(value) ? value.map(String).filter(Boolean) : []
+  const out: string[] = []
+  if (typeof summary.summary === "string" && summary.summary)
+    out.push(summary.summary)
+  for (const [key, title] of [
+    ["decisions", "決議"],
+    ["questions", "待釐清"],
+    ["improvements", "要改進"],
+  ] as const) {
+    const items = list(summary[key])
+    if (items.length > 0)
+      out.push(`### ${title}`, items.map((item) => `- ${item}`).join("\n"))
+  }
+  const agenda = Array.isArray(summary.agenda)
+    ? (summary.agenda as { text?: string; status?: string; note?: string }[])
+    : []
+  if (agenda.length > 0)
+    out.push(
+      "### 議程",
+      agenda
+        .map((item) => {
+          const mark =
+            agendaMark[item.status as keyof typeof agendaMark] ?? "還沒談"
+          return `- ${item.text}（${mark}）${item.note ? `：${item.note}` : ""}`
+        })
+        .join("\n")
+    )
+  return out.join("\n\n")
+}
+
 function size(bytes: number) {
   if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(1)} GB`
   if (bytes >= 1e6) return `${Math.round(bytes / 1e6)} MB`
@@ -136,6 +172,12 @@ export default async function RecordingPage({
             <p className="text-muted-foreground">還沒有摘要</p>
           )}
         </section>
+        {rec.liveSummary && (
+          <section className="flex flex-col gap-6">
+            <SectionHeader title="即時摘要" />
+            <Markdown>{liveMarkdown(rec.liveSummary.summary)}</Markdown>
+          </section>
+        )}
       </div>
     </MeetShell>
   )
