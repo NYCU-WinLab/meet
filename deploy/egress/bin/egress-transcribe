@@ -59,6 +59,44 @@ for key, label in labels:
 print("\n".join(out))
 PY
 
+# Asks meet who the diarized speakers are, from what the summary service
+# heard live (matched by text). Logs the answer and keeps it under
+# $STATE/speakers/. With SPEAKER_NAMES=apply in the env file it also renames
+# them in transcribe, so the transcript and the notes carry the names.
+match_speakers() { # <job> <transcript.txt>
+  [ -n "${MEET_URL:-}" ] && [ -n "${MEET_SERVICE_KEY:-}" ] && [ -n "${room:-}" ] || return 0
+  local out=$STATE/speakers/$1.json names
+  mkdir -p "$STATE/speakers"
+  python3 - "$2" "$room" "${start:-}" "${end:-}" > "$out.req" <<'MATCH' || return 0
+import json, re, sys
+path, room, start, end = sys.argv[1:5]
+segments = []
+for line in open(path, encoding="utf-8"):
+    m = re.match(r"\s*\[(SPEAKER_\d+)\]\s*(.*)", line)
+    if m and m.group(2).strip():
+        segments.append({"speaker": m.group(1), "text": m.group(2).strip()[:5000]})
+if not segments or not start:
+    sys.exit(1)
+print(json.dumps({"room": room, "from": start, "to": end or start, "segments": segments[:20000]}, ensure_ascii=False))
+MATCH
+  if ! curl -g -sS -f --max-time 60 -H "Authorization: Bearer $MEET_SERVICE_KEY" -H "content-type: application/json" \
+      --data-binary "@$out.req" -o "$out" "${MEET_URL%/}/api/actions/match_speakers"; then
+    echo "speaker match failed: $stem" >&2; rm -f "$out.req"; return 0
+  fi
+  rm -f "$out.req"
+  python3 - "$out" "$stem" <<'SHOW'
+import json, sys
+d = json.load(open(sys.argv[1]))
+parts = [f"{s['speaker']}={s['name'] or '-'} ({s['leading']} {s['share']:.2f}, covered {s['covered']:.2f})" for s in d.get("speakers", [])]
+print(f"speakers {sys.argv[2]}: {d.get('lines')} live lines; " + "; ".join(parts))
+SHOW
+  [ "${SPEAKER_NAMES:-}" = apply ] || return 0
+  names=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(json.dumps({"names": {s["speaker"]: s["name"] for s in d.get("speakers", []) if s.get("name")}}, ensure_ascii=False))' "$out")
+  [ "$names" = '{"names": {}}' ] && return 0
+  tx -f -X PATCH -H 'content-type: application/json' -d "$names" -o /dev/null "$TX/api/jobs/$1/speakers" \
+    || echo "speaker rename failed: $stem" >&2
+}
+
 urlencode() { python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$1"; }
 sha_of() { [ -s "$1" ] && sha256sum "$1" | cut -c1-64; }
 # The recording's folder as a WebDAV path: meet/<month>/<stem>/ for a
@@ -227,6 +265,8 @@ for pending in "$STATE"/*.pending; do
     # Meeting notes come from a second, slower job; ask once, collect later.
     if [ "${group:-}" = lab-meeting ]; then type=lab_meeting; else type=general; fi
     if [ -z "${notes_asked:-}" ]; then
+      # Names first: the notes are written from the renamed transcript.
+      match_speakers "$job" "$tmp/t.txt"
       tx -X POST -H 'content-type: application/json' -d "{\"meeting_type\":\"$type\"}" -o /dev/null "$TX/api/jobs/$job/meeting-notes"
       echo "notes_asked=1" >> "$pending"
       rm -rf "$tmp"; continue

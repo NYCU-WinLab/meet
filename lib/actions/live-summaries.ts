@@ -1,8 +1,10 @@
+import { and, eq, gte, lte } from "drizzle-orm"
 import { z } from "zod"
 
 import { defineAction } from "@/lib/actions/define"
 import { db } from "@/lib/db"
 import { liveSummary } from "@/lib/db/schema"
+import { matchSpeakers } from "@/lib/speaker-match"
 
 const line = z.object({
   at: z.number(),
@@ -40,4 +42,42 @@ export const saveLiveSummary = defineAction({
   },
   // Every meeting sends one after each rewrite; nobody watches it live.
   quiet: true,
+})
+
+export const matchRecordingSpeakers = defineAction({
+  name: "match_speakers",
+  title: "比對說話者",
+  description:
+    "For the recording uploader: names the diarized speakers (SPEAKER_00, …) of a recording's transcript from the lines the summary service heard live in that room between from and to, matched by text. A speaker gets a name only on clear evidence; room microphones never name one. Egress only.",
+  kind: "query",
+  input: z.object({
+    room: z.string().min(1).max(100),
+    from: z.coerce.date(),
+    to: z.coerce.date(),
+    segments: z
+      .array(
+        z.object({ speaker: z.string().max(40), text: z.string().max(5000) })
+      )
+      .max(20_000),
+  }),
+  async run(actor, input) {
+    if (actor.service !== "egress") throw new Error("只給錄影上傳服務用")
+    // A booking's parts can span several stays of the summary service.
+    const hour = 60 * 60 * 1000
+    const rows = await db
+      .select({ lines: liveSummary.lines })
+      .from(liveSummary)
+      .where(
+        and(
+          eq(liveSummary.room, input.room),
+          lte(liveSummary.startedAt, new Date(input.to.getTime() + hour)),
+          gte(liveSummary.updatedAt, new Date(input.from.getTime() - hour))
+        )
+      )
+    const lines = rows.flatMap((row) => row.lines)
+    return {
+      lines: lines.length,
+      speakers: matchSpeakers(input.segments, lines),
+    }
+  },
 })
