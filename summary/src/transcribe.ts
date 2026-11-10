@@ -1,6 +1,8 @@
 // One chunk of speech to text through the lab's transcribe service: a WAV in,
 // a job id back, the transcript once the job is done. Silence is dropped
 // before it leaves, so an open microphone with nobody talking costs nothing.
+// Each chunk is diarized: the speaker count tells a microphone that several
+// people in one room share from a microphone one member uses alone.
 import { Limiter, runWithBackoff } from "./limiter.js"
 
 const base = process.env.TRANSCRIBE_URL ?? "https://transcribe.winlab.tw"
@@ -27,13 +29,18 @@ const stamp = (...parts: unknown[]) =>
   console.log(new Date().toISOString(), ...parts)
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
+/** What one chunk said, and how many people said a real part of it. */
+export type Heard = { text: string; speakers: number }
+
+const nothing: Heard = { text: "", speakers: 0 }
+
 export async function transcribeChunk(
   pcm: Buffer,
   sampleRate: number
-): Promise<string> {
+): Promise<Heard> {
   if (!token) throw new Error("TRANSCRIBE_TOKEN is not set")
-  if (pcm.byteLength < (sampleRate * 2 * minMs) / 1000) return ""
-  if (rms(pcm) < quiet) return ""
+  if (pcm.byteLength < (sampleRate * 2 * minMs) / 1000) return nothing
+  if (rms(pcm) < quiet) return nothing
   const form = new FormData()
   form.set(
     "file",
@@ -41,7 +48,7 @@ export async function transcribeChunk(
     "chunk.wav"
   )
   form.set("language", language)
-  form.set("diarize", "false")
+  form.set("diarize", "true")
   // The slot is held from the POST until the transcript is read, since the
   // service counts a job as in progress until then.
   return runWithBackoff(
@@ -63,7 +70,7 @@ export async function transcribeChunk(
   )
 }
 
-async function finish(created: Response): Promise<string> {
+async function finish(created: Response): Promise<Heard> {
   const { job_id: job } = (await created.json()) as { job_id: string }
   const deadline = Date.now() + 90_000
   while (Date.now() < deadline) {
@@ -80,7 +87,33 @@ async function finish(created: Response): Promise<string> {
     headers: { authorization: `Bearer ${token}` },
   })
   if (!text.ok) throw new Error(`transcript ${text.status}`)
-  return (await text.text()).replace(/\s+/g, " ").trim()
+  return parseDiarized(await text.text())
+}
+
+/** A speaker counts when they said at least this share of the chunk. */
+const SPEAKER_SHARE = 0.15
+
+/**
+ * Reads a diarized transcript ("[SPEAKER_00] text" per line) into plain text
+ * and the number of speakers. A speaker with a word or two ("好", "對") is
+ * not counted: diarization splits those off a single voice too.
+ */
+export function parseDiarized(raw: string): Heard {
+  const chars = new Map<string, number>()
+  const parts: string[] = []
+  for (const line of raw.split("\n")) {
+    const match = /^\s*\[(SPEAKER_\d+)\]\s*(.*)$/.exec(line)
+    const said = (match ? match[2] : line).trim()
+    if (!said) continue
+    parts.push(said)
+    if (match) chars.set(match[1], (chars.get(match[1]) ?? 0) + said.length)
+  }
+  const text = parts.join(" ").replace(/\s+/g, " ").trim()
+  const total = [...chars.values()].reduce((a, b) => a + b, 0)
+  const speakers = [...chars.values()].filter(
+    (n) => total > 0 && n / total >= SPEAKER_SHARE
+  ).length
+  return { text, speakers: Math.max(speakers, text ? 1 : 0) }
 }
 
 function rms(pcm: Buffer) {

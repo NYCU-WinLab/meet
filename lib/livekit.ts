@@ -282,7 +282,7 @@ export async function joinToken(input: {
     canPublish: true,
     canSubscribe: true,
     canPublishData: true,
-    // The room-microphone switch is an attribute the member sets on itself.
+    // Raising a hand is an attribute the member sets on itself.
     canUpdateOwnMetadata: !input.guest,
   })
   return { serverUrl: url(), token: await token.toJwt() }
