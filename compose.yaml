@@ -51,7 +51,7 @@ services:
       start_interval: 1s
 
   # Running summary: joins every room as a hidden participant, sends each
-  # microphone to the lab's transcribe service in 60 s chunks (at most 2 jobs in
+  # microphone to the lab's transcribe service in 30 s chunks (at most 2 jobs in
   # flight, 429 retried with back-off) and has a small
   # model keep one summary (questions, improvements, decisions) that the
   # meeting page shows. Same LiveKit env as web, plus TRANSCRIBE_TOKEN,
