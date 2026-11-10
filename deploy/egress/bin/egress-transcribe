@@ -19,6 +19,7 @@ notes = json.load(sys.stdin).get("content")
 if not notes:
     sys.exit(1)
 stem = sys.argv[1]
+meeting_type = sys.argv[2] if len(sys.argv) > 2 else "general"
 out = [f"# {notes.get('title') or stem}", ""]
 if notes.get("summary"):
     out += [notes["summary"], ""]
@@ -26,7 +27,11 @@ labels = [("discussion_items", "討論"), ("student_updates", "進度"), ("decis
           ("action_items", "待辦"), ("open_questions", "待釐清"), ("next_milestones", "下一步"),
           ("experiments_discussed", "實驗"), ("papers_cited", "提到的論文"), ("models_mentioned", "模型"),
           ("resources_needed", "需要的資源"), ("metrics", "數據")]
+# transcribe always tries the research fields; only a lab meeting shows them.
+research = {"experiments_discussed", "papers_cited", "models_mentioned", "resources_needed", "metrics"}
 for key, label in labels:
+    if key in research and meeting_type != "lab_meeting":
+        continue
     items = notes.get(key) or []
     if not items:
         continue
@@ -220,14 +225,14 @@ for pending in "$STATE"/*.pending; do
   done
   if [ "$ok" = 1 ]; then
     # Meeting notes come from a second, slower job; ask once, collect later.
+    if [ "${group:-}" = lab-meeting ]; then type=lab_meeting; else type=general; fi
     if [ -z "${notes_asked:-}" ]; then
-      if [ "${group:-}" = lab-meeting ]; then type=lab_meeting; else type=general; fi
       tx -X POST -H 'content-type: application/json' -d "{\"meeting_type\":\"$type\"}" -o /dev/null "$TX/api/jobs/$job/meeting-notes"
       echo "notes_asked=1" >> "$pending"
       rm -rf "$tmp"; continue
     fi
     tx "$TX/api/jobs/$job/meeting-notes" > "$tmp/notes.raw"
-    python3 -c "$RENDER_NOTES" "$stem" < "$tmp/notes.raw" > "$tmp/notes.md" 2>/dev/null
+    python3 -c "$RENDER_NOTES" "$stem" "$type" < "$tmp/notes.raw" > "$tmp/notes.md" 2>/dev/null
     # The notes' content as JSON too, for the helper's record.
     python3 -c 'import json, sys
 c = json.load(sys.stdin).get("content")
