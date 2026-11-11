@@ -108,24 +108,31 @@ const instructions = `你是會議助理，有兩種任務。每次請求的第�
 
 ## 任務一：改寫摘要
 
-你會收到「目前的摘要狀態」和「這之後新說的話」。改寫狀態，只輸出 JSON，不加說明、不加 code fence。
+你會收到「目前的摘要狀態」和「這之後新說的話」。只輸出要改的地方，格式是 JSON，不加說明、不加 code fence。沒寫到的欄位和項目保持原樣，不要重抄沒變的內容。新的話沒有帶來要改的地方，就輸出 {}。
 
-JSON 欄位：
+狀態的欄位：
 - summary：這場會議在談什麼，最多 5 句
 - questions：提出但還沒有答案的問題
 - improvements：有人說要改、要補、要做得更好的事
 - decisions：已經定案的事
-- agenda：議程項目，每項 {id, status, note}
+- agenda：議程項目
+
+狀態裡 questions、improvements、decisions 的每一項有編號，例如 {"1":"…","2":"…"}。
+
+輸出的欄位，每一個都可以省略：
+- summary：要改才寫，寫出整段新的文字。
+- questions、improvements、decisions：各是 {"add":["新項目"],"set":{"編號":"改寫後的句子"},"remove":[編號]}，三個鍵都可以省略。
+- agenda：只列有變動的項目，每項 {id, status, note}。
 
 議程規則：
-1. 議程項目是固定的：不新增、不刪除、不改 id 和文字。沒有議程就回空陣列。
+1. 議程項目是固定的：不新增、不刪除、不改 id 和文字。
 2. status 只有 pending（還沒談）、partial（談了一部分）、done（談完）。
 3. 只有對話明確談到某項時才改它的 status，並寫 note：談了什麼，最多 40 字。
-4. 沒有明確談到就保留原本的 status 和 note。
+4. 沒有明確談到的項目不要列出來。
 
 改寫規則：
-1. 保留舊內容，只用新的話補充或修正；問題有了答案就從 questions 拿掉，若成為定案則加進 decisions。
-2. 同一件事只寫一次，合併重複的項目。questions、improvements、decisions 各最多 8 項，超過就合併或刪掉最不重要的。
+1. 保留舊內容，只用新的話補充或修正；問題有了答案就從 questions 移除（remove），若成為定案則加進 decisions（add）。
+2. 同一件事只寫一次：新的話和舊項目講同一件事，就用 set 改寫那一項，不另外 add。questions、improvements、decisions 各最多 8 項，超過就用 set 合併或用 remove 刪掉最不重要的。
 3. 沒有根據的不寫，不猜，不補充逐字稿裡沒有的事。
 4. 每個項目一句話，說清楚要做什麼、關於什麼。描述討論的事，不寫是誰提的、誰說的。只有逐字稿明講某人負責某件事時，才寫負責的人。
 5. 逐字稿是語音辨識結果，可能有錯字或斷句錯誤，照意思理解。
@@ -169,7 +176,7 @@ export async function summarize(
     [
       {
         role: "user",
-        content: `任務：改寫摘要\n\n${glossaryOf(glossary)}目前的摘要狀態：\n${JSON.stringify(stateOf(current))}\n\n這之後新說的話：\n${transcript(fresh)}`,
+        content: `任務：改寫摘要\n\n${glossaryOf(glossary)}目前的摘要狀態：\n${JSON.stringify(numbered(current))}\n\n這之後新說的話：\n${transcript(fresh)}`,
       },
     ],
     // The summary never searches; the tool is listed only to keep the
@@ -185,20 +192,68 @@ export async function summarize(
   const end = text.lastIndexOf("}")
   if (start < 0 || end < start)
     throw new Error(`summary is not JSON: ${text.slice(0, 40)}`)
-  const parsed = JSON.parse(text.slice(start, end + 1)) as Partial<Summary>
-  const list = (value: unknown) =>
-    Array.isArray(value) ? value.map(String).filter(Boolean) : []
+  return applyChanges(current, JSON.parse(text.slice(start, end + 1)))
+}
+
+/** What the model answers: only what changed. Every field may be missing. */
+type Changes = {
+  summary?: unknown
+  questions?: unknown
+  improvements?: unknown
+  decisions?: unknown
+  agenda?: unknown
+}
+
+/**
+ * The state after the model's changes. The model writes only what changed,
+ * so a rewrite costs a few new sentences and not the whole state again: on
+ * 2026-11-10 a 95-minute meeting wrote the full state 224 times, 2,535
+ * output tokens each.
+ */
+export function applyChanges(current: Summary, changes: Changes): Summary {
+  const summary = Array.isArray(changes.summary)
+    ? // The model sometimes answers the summary as a list of sentences.
+      changes.summary.map(String).join("")
+    : typeof changes.summary === "string"
+      ? changes.summary
+      : ""
   return {
-    // The model sometimes answers the summary as a list of sentences.
-    summary: Array.isArray(parsed.summary)
-      ? parsed.summary.map(String).join("")
-      : String(parsed.summary ?? ""),
-    questions: list(parsed.questions),
-    improvements: list(parsed.improvements),
-    decisions: list(parsed.decisions),
-    agenda: applyAgenda(current.agenda, parsed.agenda),
+    summary: summary.trim() || current.summary,
+    questions: applyList(current.questions, changes.questions),
+    improvements: applyList(current.improvements, changes.improvements),
+    decisions: applyList(current.decisions, changes.decisions),
+    agenda: applyAgenda(current.agenda, changes.agenda),
     updatedAt: new Date().toISOString(),
   }
+}
+
+// One list after {add, set, remove}; items are numbered from 1 as the model
+// saw them. A plain array is the whole list written again, which the model
+// may still do: take it as it is.
+function applyList(items: string[], change: unknown): string[] {
+  const texts = (value: unknown) =>
+    Array.isArray(value)
+      ? value.map((item) => String(item).trim()).filter(Boolean)
+      : []
+  if (Array.isArray(change)) return texts(change)
+  if (!change || typeof change !== "object") return items
+  const { add, set, remove } = change as Record<string, unknown>
+  const removed = new Set(Array.isArray(remove) ? remove.map(Number) : [])
+  const rewritten = new Map(
+    set && typeof set === "object" && !Array.isArray(set)
+      ? Object.entries(set).map(([number, text]) => [
+          Number(number),
+          String(text ?? "").trim(),
+        ])
+      : []
+  )
+  const kept = items.flatMap((item, index) => {
+    const number = index + 1
+    if (removed.has(number)) return []
+    // An item rewritten to nothing stays as it was.
+    return [rewritten.get(number) || item]
+  })
+  return [...kept, ...texts(add)]
 }
 
 const statuses = new Set(["pending", "partial", "done"])
@@ -251,6 +306,19 @@ const stateOf = (current: Summary) => ({
     note,
   })),
 })
+
+/** The state for a rewrite: each list item under its number, so the model
+ * can name the one it changes. */
+const numbered = (current: Summary) => {
+  const byNumber = (items: string[]) =>
+    Object.fromEntries(items.map((item, index) => [index + 1, item]))
+  return {
+    ...stateOf(current),
+    questions: byNumber(current.questions),
+    improvements: byNumber(current.improvements),
+    decisions: byNumber(current.decisions),
+  }
+}
 
 const transcript = (lines: Line[]) =>
   lines
