@@ -239,19 +239,18 @@ function Stage() {
           className="min-h-0 flex-1"
         />
         {rest.length > 0 && (
-          // A scroller clips on every side; the padding keeps the speaking
-          // ring around each tile visible, the negative margin keeps the
-          // tiles where they were.
-          <div className="-m-1 flex gap-4 overflow-x-auto p-1">
-            {rest.map((trackRef) => (
-              <Tile
-                key={tileKey(trackRef)}
-                trackRef={trackRef}
-                onPin={() => pin(trackRef)}
-                className="aspect-video w-48 shrink-0"
-              />
-            ))}
-          </div>
+          <Filmstrip>
+            {(tile) =>
+              rest.map((trackRef) => (
+                <Tile
+                  key={tileKey(trackRef)}
+                  trackRef={trackRef}
+                  onPin={() => pin(trackRef)}
+                  className={tile}
+                />
+              ))
+            }
+          </Filmstrip>
         )}
       </div>
     )
@@ -278,6 +277,122 @@ function Stage() {
           onPin={() => pin(trackRef)}
         />
       ))}
+    </div>
+  )
+}
+
+// The cameras under a screen share. The handle above them drags their
+// height (arrow keys too, double-click resets); dragged near the bottom the
+// row hides, so the share fills the stage. The height is kept in this browser.
+const STRIP_DEFAULT = 108
+const STRIP_MIN = 64
+const STRIP_MAX = 320
+const STRIP_KEY = "meet.strip-height"
+
+function Filmstrip({
+  children,
+}: {
+  children: (tileClassName: string) => React.ReactNode
+}) {
+  const frame = React.useRef<HTMLDivElement>(null)
+  const handle = React.useRef<HTMLDivElement>(null)
+  const height = React.useRef(STRIP_DEFAULT)
+  const [dragging, setDragging] = React.useState(false)
+
+  const apply = React.useCallback((wanted: number) => {
+    const most = Math.max(
+      STRIP_MIN,
+      Math.min(STRIP_MAX, window.innerHeight * 0.4)
+    )
+    const next =
+      wanted < STRIP_MIN / 2
+        ? 0
+        : Math.round(Math.min(most, Math.max(STRIP_MIN, wanted)))
+    frame.current?.style.setProperty("--strip", `${next}px`)
+    handle.current?.setAttribute("aria-valuenow", String(next))
+    height.current = next
+    // An attribute, not state: the row hides through CSS.
+    frame.current?.toggleAttribute("data-hidden", next === 0)
+    return next
+  }, [])
+
+  React.useEffect(() => {
+    let saved = STRIP_DEFAULT
+    try {
+      const stored = localStorage.getItem(STRIP_KEY)
+      if (stored !== null && Number.isFinite(Number(stored)))
+        saved = Number(stored)
+    } catch {}
+    apply(saved)
+  }, [apply])
+
+  const save = (value: number) => {
+    try {
+      localStorage.setItem(STRIP_KEY, String(value))
+    } catch {}
+  }
+
+  function startDrag(event: React.PointerEvent<HTMLDivElement>) {
+    event.preventDefault()
+    event.currentTarget.setPointerCapture(event.pointerId)
+    setDragging(true)
+  }
+  function drag(event: React.PointerEvent<HTMLDivElement>) {
+    if (!dragging) return
+    const bottom =
+      frame.current?.getBoundingClientRect().bottom ?? window.innerHeight
+    apply(bottom - event.clientY - GUTTER / 2)
+  }
+  function endDrag() {
+    if (!dragging) return
+    setDragging(false)
+    save(height.current)
+  }
+
+  return (
+    // The handle sits in the gutter between the share and the cameras.
+    <div ref={frame} className="group/strip -mt-6 flex flex-col">
+      <div
+        ref={handle}
+        role="separator"
+        aria-orientation="horizontal"
+        aria-label="調整下方人像的高度"
+        aria-valuemin={0}
+        aria-valuemax={STRIP_MAX}
+        tabIndex={0}
+        onPointerDown={startDrag}
+        onPointerMove={drag}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+        onDoubleClick={() => save(apply(STRIP_DEFAULT))}
+        onKeyDown={(event) => {
+          if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return
+          event.preventDefault()
+          const now = height.current
+          save(
+            apply(
+              event.key === "ArrowUp" ? Math.max(STRIP_MIN, now + 32) : now - 32
+            )
+          )
+        }}
+        className="group flex h-6 shrink-0 cursor-row-resize touch-none items-center justify-center outline-none"
+      >
+        <span
+          aria-hidden
+          className={cn(
+            "h-1 w-12 rounded-full bg-border transition-colors duration-state group-hover:bg-muted-foreground group-focus-visible:bg-primary",
+            dragging && "bg-primary"
+          )}
+        />
+      </div>
+      {/* A scroller clips on every side; the padding keeps the speaking
+          ring around each tile visible, the negative margin keeps the
+          tiles where they were. */}
+      <div className="-m-1 flex gap-4 overflow-x-auto p-1 group-data-[hidden]/strip:hidden">
+        {children(
+          cn("aspect-video h-(--strip) shrink-0", dragging && "transition-none")
+        )}
+      </div>
     </div>
   )
 }
