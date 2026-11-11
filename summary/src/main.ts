@@ -377,8 +377,9 @@ async function caption(
 }
 
 // Rewrites the summary with the oldest lines it has not seen, at most one
-// batch, then publishes it. A backlog (after a failure) is folded in batch by
-// batch right away, so every line reaches the summary and no call grows.
+// batch, then publishes it. A backlog (a full batch or more, after a failure)
+// is folded in batch by batch right away, so every line reaches the summary
+// and no call grows.
 async function refresh(meeting: Meeting) {
   if (meeting.summarizing || meeting.seen === meeting.lines.length) return
   const fresh = meeting.lines
@@ -395,7 +396,12 @@ async function refresh(meeting: Meeting) {
     )
     meeting.seen += fresh.length
     meeting.summary = next
-    more = meeting.seen < meeting.lines.length && joined.has(meeting.name)
+    // Only a full batch still waiting is a backlog. Lines that came in while
+    // this call ran wait for the next tick: folding them in right away made
+    // the rewrites run back to back, one every 25 s for 2 lines each.
+    more =
+      meeting.lines.length - meeting.seen >= batchLines &&
+      joined.has(meeting.name)
     keep(meeting)
     await publish(meeting)
   } catch (error) {
