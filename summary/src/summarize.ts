@@ -121,7 +121,9 @@ const instructions = `你是會議助理，有兩種任務。每次請求的第�
 
 輸出的欄位，每一個都可以省略：
 - summary：要改才寫，寫出整段新的文字。
-- questions、improvements、decisions：各是 {"add":["新項目"],"set":{"編號":"改寫後的句子"},"remove":[編號]}，三個鍵都可以省略。
+- questions_add、improvements_add、decisions_add：要新增的項目，例如 ["新項目"]。
+- questions_set、improvements_set、decisions_set：要改寫的項目，例如 {"2":"改寫後的句子"}，鍵是編號。
+- questions_remove、improvements_remove、decisions_remove：要移除的編號，例如 [3]。
 - agenda：只列有變動的項目，每項 {id, status, note}。
 
 議程規則：
@@ -131,8 +133,8 @@ const instructions = `你是會議助理，有兩種任務。每次請求的第�
 4. 沒有明確談到的項目不要列出來。
 
 改寫規則：
-1. 保留舊內容，只用新的話補充或修正；問題有了答案就從 questions 移除（remove），若成為定案則加進 decisions（add）。
-2. 同一件事只寫一次：新的話和舊項目講同一件事，就用 set 改寫那一項，不另外 add。questions、improvements、decisions 各最多 8 項，超過就用 set 合併或用 remove 刪掉最不重要的。
+1. 保留舊內容，只用新的話補充或修正；問題有了答案就用 questions_remove 移除，若成為定案則用 decisions_add 加進去。
+2. 同一件事只寫一次：新的話和舊項目講同一件事，就用 _set 改寫那一項，不另外 _add。questions、improvements、decisions 各最多 8 項，超過就用 _set 合併或用 _remove 刪掉最不重要的。
 3. 沒有根據的不寫，不猜，不補充逐字稿裡沒有的事。
 4. 每個項目一句話，說清楚要做什麼、關於什麼。描述討論的事，不寫是誰提的、誰說的。只有逐字稿明講某人負責某件事時，才寫負責的人。
 5. 逐字稿是語音辨識結果，可能有錯字或斷句錯誤，照意思理解。
@@ -176,7 +178,7 @@ export async function summarize(
     [
       {
         role: "user",
-        content: `任務：改寫摘要\n\n${glossaryOf(glossary)}目前的摘要狀態：\n${JSON.stringify(numbered(current))}\n\n這之後新說的話：\n${transcript(fresh)}`,
+        content: `任務：改寫摘要\n\n${glossaryOf(glossary)}目前的摘要狀態：\n${JSON.stringify(numbered(current))}\n\n${tooLong(current)}這之後新說的話：\n${transcript(fresh)}`,
       },
     ],
     // The summary never searches; the tool is listed only to keep the
@@ -186,23 +188,38 @@ export async function summarize(
   const text = textOf(data)
   console.log(new Date().toISOString(), "summary usage", data.usage)
   reportUsage(room, "summary", model, data.usage)
-  // The model sometimes writes a heading such as
-  // "任務一：改寫摘要" or a code fence around the JSON: read the outermost object.
-  const start = text.indexOf("{")
-  const end = text.lastIndexOf("}")
-  if (start < 0 || end < start)
-    throw new Error(`summary is not JSON: ${text.slice(0, 40)}`)
-  return applyChanges(current, JSON.parse(text.slice(start, end + 1)))
+  return applyChanges(current, JSON.parse(firstObject(text)))
 }
 
-/** What the model answers: only what changed. Every field may be missing. */
-type Changes = {
-  summary?: unknown
-  questions?: unknown
-  improvements?: unknown
-  decisions?: unknown
-  agenda?: unknown
+/**
+ * The first whole JSON object in the model's answer. The model sometimes
+ * writes a heading or a code fence before it, and sometimes goes on after
+ * it: one brace too many, or a second try under "Wait, I must fix". In a
+ * replay of a real meeting that broke 3 rewrites in 120 when the answer was
+ * read from the first brace to the last.
+ */
+export function firstObject(text: string): string {
+  const start = text.indexOf("{")
+  let depth = 0
+  let inString = false
+  for (let index = start; index >= 0 && index < text.length; index++) {
+    const char = text[index]
+    if (inString) {
+      if (char === "\\") index++
+      else if (char === '"') inString = false
+    } else if (char === '"') inString = true
+    else if (char === "{") depth++
+    else if (char === "}" && --depth === 0) return text.slice(start, index + 1)
+  }
+  throw new Error(`summary is not JSON: ${text.slice(0, 40)}`)
 }
+
+/** What the model answers: only what changed. Every field may be missing.
+ * Each list has three flat fields, <list>_add, <list>_set and <list>_remove:
+ * nested as {add, set, remove} the model lost count of its braces. */
+type Changes = Record<string, unknown>
+
+const LISTS = ["questions", "improvements", "decisions"] as const
 
 /**
  * The state after the model's changes. The model writes only what changed,
@@ -219,25 +236,26 @@ export function applyChanges(current: Summary, changes: Changes): Summary {
       : ""
   return {
     summary: summary.trim() || current.summary,
-    questions: applyList(current.questions, changes.questions),
-    improvements: applyList(current.improvements, changes.improvements),
-    decisions: applyList(current.decisions, changes.decisions),
+    ...(Object.fromEntries(
+      LISTS.map((name) => [name, applyList(current[name], changes, name)])
+    ) as Pick<Summary, (typeof LISTS)[number]>),
     agenda: applyAgenda(current.agenda, changes.agenda),
     updatedAt: new Date().toISOString(),
   }
 }
 
-// One list after {add, set, remove}; items are numbered from 1 as the model
-// saw them. A plain array is the whole list written again, which the model
-// may still do: take it as it is.
-function applyList(items: string[], change: unknown): string[] {
+// One list after its _add, _set and _remove fields; items are numbered from
+// 1 as the model saw them. A plain array under the list's own name is the
+// whole list written again, which the model may still do: take it as it is.
+function applyList(items: string[], changes: Changes, name: string): string[] {
   const texts = (value: unknown) =>
     Array.isArray(value)
       ? value.map((item) => String(item).trim()).filter(Boolean)
       : []
-  if (Array.isArray(change)) return texts(change)
-  if (!change || typeof change !== "object") return items
-  const { add, set, remove } = change as Record<string, unknown>
+  if (Array.isArray(changes[name])) return texts(changes[name])
+  const add = changes[`${name}_add`]
+  const set = changes[`${name}_set`]
+  const remove = changes[`${name}_remove`]
   const removed = new Set(Array.isArray(remove) ? remove.map(Number) : [])
   const rewritten = new Map(
     set && typeof set === "object" && !Array.isArray(set)
@@ -318,6 +336,19 @@ const numbered = (current: Summary) => {
     improvements: byNumber(current.improvements),
     decisions: byNumber(current.decisions),
   }
+}
+
+/** The most items a list should hold; the instructions say the same. */
+const LIST_ITEMS = 8
+
+// A line naming the lists that grew past the limit, or "". The model adds
+// more readily than it merges: in a replay of a real meeting the lists
+// reached 22 items under a rule that only said "at most 8".
+function tooLong(current: Summary): string {
+  const long = LISTS.filter((name) => current[name].length > LIST_ITEMS)
+  if (long.length === 0) return ""
+  const counts = long.map((name) => `${name} 有 ${current[name].length} 項`)
+  return `${counts.join("、")}，超過 ${LIST_ITEMS} 項：這次先用 _set 合併相近的項目、用 _remove 刪掉最不重要的，減到 ${LIST_ITEMS} 項以內。\n\n`
 }
 
 const transcript = (lines: Line[]) =>

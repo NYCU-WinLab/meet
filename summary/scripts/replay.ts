@@ -51,8 +51,18 @@ const log = console.log
 console.log = () => {}
 let state = initial([])
 const started = Date.now()
-for (const batch of batches.slice(0, Number(max)))
-  state = await summarize(state, batch, "replay")
+// A rewrite that fails keeps its lines for the next one, as the service does.
+let waiting: Line[] = []
+const failures: string[] = []
+for (const batch of batches.slice(0, Number(max))) {
+  waiting.push(...batch)
+  try {
+    state = await summarize(state, waiting, "replay")
+    waiting = []
+  } catch (error) {
+    failures.push(String(error).slice(0, 120))
+  }
+}
 console.log = log
 
 if (out) writeFileSync(out, JSON.stringify(state, null, 2))
@@ -62,6 +72,7 @@ console.log(
     ...total,
     outputPerCall: Math.round(total.output / Math.max(total.calls, 1)),
     seconds: Math.round((Date.now() - started) / 1000),
+    failures,
     stateChars: JSON.stringify(state).length,
     items: [state.questions, state.improvements, state.decisions].map(
       (list) => list.length
