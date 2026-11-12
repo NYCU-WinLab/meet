@@ -1,10 +1,10 @@
 "use client"
 
 import { useRoomContext } from "@livekit/components-react"
-import { CaptionsIcon, CaptionsOffIcon } from "lucide-react"
+import { CaptionsIcon } from "lucide-react"
 import * as React from "react"
 
-import { Button } from "@/components/ui/button"
+import { Toggle } from "@/components/ui/toggle"
 import {
   Tooltip,
   TooltipContent,
@@ -57,16 +57,14 @@ export function CaptionsControl() {
     <Tooltip>
       <TooltipTrigger
         render={
-          <Button
-            variant={on ? "default" : "outline"}
-            size="icon"
+          <Toggle
+            pressed={on}
             aria-label={on ? "關閉字幕" : "字幕"}
-            aria-pressed={on}
-            onClick={toggle}
+            onPressedChange={toggle}
           />
         }
       >
-        {on ? <CaptionsIcon /> : <CaptionsOffIcon />}
+        <CaptionsIcon />
       </TooltipTrigger>
       <TooltipContent>{on ? "關閉字幕" : "字幕"}</TooltipContent>
     </Tooltip>

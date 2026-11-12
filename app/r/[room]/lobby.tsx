@@ -14,6 +14,7 @@ import { MicIcon, MicOffIcon, VideoIcon, VideoOffIcon } from "lucide-react"
 import * as React from "react"
 
 import { Button } from "@/components/ui/button"
+import { Toggle } from "@/components/ui/toggle"
 import {
   Select,
   SelectContent,
@@ -23,6 +24,7 @@ import {
 } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
 
+import { useLevel } from "./level"
 import { Meeting } from "./meeting"
 
 /** What the member chose before going in. */
@@ -209,32 +211,7 @@ function Preview({ track }: { track?: LocalVideoTrack }) {
 // before anyone has to say "can you hear me".
 function Level({ track }: { track?: LocalAudioTrack }) {
   const bar = React.useRef<HTMLDivElement>(null)
-  React.useEffect(() => {
-    if (!track?.mediaStreamTrack) return
-    const context = new AudioContext()
-    const source = context.createMediaStreamSource(
-      new MediaStream([track.mediaStreamTrack])
-    )
-    const analyser = context.createAnalyser()
-    analyser.fftSize = 512
-    source.connect(analyser)
-    const samples = new Uint8Array(analyser.fftSize)
-    let frame = 0
-    const draw = () => {
-      analyser.getByteTimeDomainData(samples)
-      let peak = 0
-      for (const sample of samples)
-        peak = Math.max(peak, Math.abs(sample - 128))
-      if (bar.current)
-        bar.current.style.transform = `scaleX(${Math.min(1, (peak / 128) * 2.5)})`
-      frame = requestAnimationFrame(draw)
-    }
-    draw()
-    return () => {
-      cancelAnimationFrame(frame)
-      void context.close()
-    }
-  }, [track])
+  useLevel(track?.mediaStreamTrack, bar, "x")
   return (
     <div
       aria-hidden
@@ -279,15 +256,15 @@ function DeviceRow({
     }))
   return (
     <div className="flex items-center gap-3">
-      <Button
-        variant={on ? "outline" : "default"}
-        size="icon"
+      <Toggle
+        variant="alert"
+        pressed={on}
         aria-label={on ? onLabel : offLabel}
-        aria-pressed={on}
-        onClick={onToggle}
+        onPressedChange={onToggle}
+        offIcon={offIcon}
       >
-        {on ? onIcon : offIcon}
-      </Button>
+        {onIcon}
+      </Toggle>
       <Select
         value={items.some((item) => item.value === value) ? value : null}
         items={items}
