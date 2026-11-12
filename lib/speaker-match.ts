@@ -46,9 +46,15 @@ function pairs(text: string) {
   return out
 }
 
-/** Strips the chat mark: typed lines are not speech, so they never vote. */
+/** Typed lines are not speech, and what a screen share plays is not the
+ * voice of the member who shares it: neither votes. */
 const spoken = (lines: LiveLine[]) =>
-  lines.filter((line) => !line.who.endsWith("（聊天）") && line.text)
+  lines.filter(
+    (line) =>
+      !line.who.endsWith("（聊天）") &&
+      !line.who.endsWith("（螢幕分享）") &&
+      line.text
+  )
 
 export function matchSpeakers(
   segments: Segment[],

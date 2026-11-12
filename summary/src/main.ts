@@ -1,5 +1,5 @@
 // A running summary for every meeting. A hidden participant joins each room,
-// cuts every microphone into short chunks, has the lab's transcribe service
+// cuts every microphone and every screen share's audio into short chunks, has the lab's transcribe service
 // turn each chunk into text, and every so often asks a small model to rewrite
 // one summary state (summary, open questions, improvements, decisions) with
 // the lines said since. The state goes to everyone in the room on the
@@ -59,6 +59,9 @@ const MENTION = /@agent\b/i
 const AGENT_ATTRIBUTE = "meet.agent"
 /** Who a room microphone's lines are said by: people there, not its account. */
 const ROOM = "會議室"
+/** Marks a line heard from the audio of a screen share: a video or another
+ * call played to the meeting, not the voice of the member who shares it. */
+const SCREEN = "（螢幕分享）"
 
 function need(name: string) {
   const value = process.env[name]
@@ -73,7 +76,7 @@ type Line = {
   at: number
   who: string
   text: string
-  /** The microphone's participant; chat lines have none. */
+  /** The microphone's participant; chat and screen share lines have none. */
   identity?: string
 }
 
@@ -228,7 +231,12 @@ async function join(name: string, metadata: string) {
 
   room.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
     if (track.kind !== TrackKind.KIND_AUDIO) return
-    if (publication.source !== TrackSource.SOURCE_MICROPHONE) return
+    const source = publication.source
+    if (
+      source !== TrackSource.SOURCE_MICROPHONE &&
+      source !== TrackSource.SOURCE_SCREENSHARE_AUDIO
+    )
+      return
     void listen(meeting, track, publication, participant)
   })
   // Typed chat counts as said: each message is one line, marked as chat.
@@ -285,8 +293,10 @@ async function join(name: string, metadata: string) {
   }
 }
 
-// One microphone: 16 kHz mono PCM collected for chunkMs, then sent as a WAV
-// to transcribe. Chunks come back out of order across speakers; lines carry
+// One microphone, or the audio of one screen share: 16 kHz mono PCM
+// collected for chunkMs, then sent as a WAV to transcribe. What a screen
+// share plays has many voices and none is the member's, so it is never
+// judged as a room microphone and its lines carry the screen share mark. Chunks come back out of order across speakers; lines carry
 // the time the chunk started so the summary can read them in order.
 async function listen(
   meeting: Meeting,
@@ -294,7 +304,9 @@ async function listen(
   publication: RemoteTrackPublication,
   participant: RemoteParticipant
 ) {
-  const who = participant.name || participant.identity
+  const screen = publication.source === TrackSource.SOURCE_SCREENSHARE_AUDIO
+  const name = participant.name || participant.identity
+  const who = screen ? `${name}${SCREEN}` : name
   const stream = new AudioStream(track, SAMPLE_RATE, 1)
   let parts: Uint8Array[] = []
   let bytes = 0
@@ -311,14 +323,14 @@ async function listen(
     void transcribeChunk(chunk, SAMPLE_RATE)
       .then(({ text, speakers }) => {
         if (!text) return
-        const identity = participant.identity
-        if (meeting.roomMics.observe(identity, speakers)) {
+        const identity = screen ? undefined : participant.identity
+        if (identity && meeting.roomMics.observe(identity, speakers)) {
           // Lines heard before it was found are the room's too.
           for (const line of meeting.lines)
             if (line.identity === identity) line.who = ROOM
           log(meeting.name, who, "is a room microphone")
         }
-        const said = meeting.roomMics.has(identity) ? ROOM : who
+        const said = identity && meeting.roomMics.has(identity) ? ROOM : who
         meeting.lines.push({ at, who: said, text, identity })
         log(
           meeting.name,
