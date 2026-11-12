@@ -175,7 +175,7 @@ export function Meeting({
           onMediaDeviceFailure={(failure) => {
             if (failure) toast.error("開不了鏡頭或麥克風，請檢查瀏覽器權限")
           }}
-          className="fixed top-16 right-4 bottom-4 left-4 flex flex-col gap-4 md:top-20 md:flex-row md:gap-0"
+          className="fixed top-14 right-4 bottom-4 left-4 flex flex-col gap-4 md:top-18 md:flex-row md:gap-0"
         >
           <RoomAudioRenderer muted={!hearing} />
           <SummaryListener onSummary={setSummary} />
