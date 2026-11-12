@@ -554,7 +554,8 @@ function Controls({
 
   return (
     <TooltipProvider>
-      <div className="flex items-center gap-3">
+      {/* 7 controls fit a 320px phone only with the smaller gap. */}
+      <div className="flex items-center gap-2 sm:gap-3">
         <RecordingState />
         <span className="contents max-md:hidden">
           <Divider />
