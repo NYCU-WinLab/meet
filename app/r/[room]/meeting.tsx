@@ -175,7 +175,7 @@ export function Meeting({
           onMediaDeviceFailure={(failure) => {
             if (failure) toast.error("開不了鏡頭或麥克風，請檢查瀏覽器權限")
           }}
-          className="fixed top-16 right-4 bottom-4 left-4 flex flex-col gap-6 md:top-20 md:flex-row md:gap-0"
+          className="fixed top-16 right-4 bottom-4 left-4 flex flex-col gap-4 md:top-20 md:flex-row md:gap-0"
         >
           <RoomAudioRenderer muted={!hearing} />
           <SummaryListener onSummary={setSummary} />
@@ -195,7 +195,8 @@ export function Meeting({
             <Captions />
           </div>
           <MeetingPanel open={open} summary={summary} />
-          <div className="flex justify-center md:hidden">
+          {/* A phone's bar spans the stage, edge to edge. */}
+          <div className="flex md:hidden">
             <Controls
               open={open}
               onToggle={toggle}
@@ -242,7 +243,7 @@ function Stage() {
   if (featured) {
     const rest = tracks.filter((t) => t !== featured)
     return (
-      <div className="flex min-h-0 flex-1 flex-col gap-6">
+      <div className="flex min-h-0 flex-1 flex-col gap-4">
         <Tile
           trackRef={featured}
           pinned={pinned !== undefined}
@@ -280,7 +281,7 @@ function Stage() {
             ? "grid-cols-2 landscape:grid-cols-3"
             : "grid-cols-2 landscape:grid-cols-4"
   return (
-    <div className={cn("grid min-h-0 flex-1 auto-rows-fr gap-6", columns)}>
+    <div className={cn("grid min-h-0 flex-1 auto-rows-fr gap-4", columns)}>
       {tracks.map((trackRef) => (
         <Tile
           key={tileKey(trackRef)}
@@ -362,7 +363,7 @@ function Filmstrip({
 
   return (
     // The handle sits in the gutter between the share and the cameras.
-    <div ref={frame} className="group/strip -mt-6 flex flex-col">
+    <div ref={frame} className="group/strip -mt-4 flex flex-col">
       <div
         ref={handle}
         role="separator"
@@ -386,7 +387,7 @@ function Filmstrip({
             )
           )
         }}
-        className="group flex h-6 shrink-0 cursor-row-resize touch-none items-center justify-center outline-none"
+        className="group flex h-4 shrink-0 cursor-row-resize touch-none items-center justify-center outline-none"
       >
         <span
           aria-hidden
@@ -442,7 +443,9 @@ function Tile({
   return (
     <div
       className={cn(
-        "relative overflow-hidden rounded-control bg-muted transition-all duration-state",
+        // Concentric corners: the tile is rounded-menu, its chips are
+        // rounded-control and sit 4px in, like rows in a menu.
+        "relative overflow-hidden rounded-menu bg-muted transition-all duration-state",
         !screen && "min-h-0",
         speaking && !screen && "ring-2 ring-primary",
         className
@@ -464,7 +467,7 @@ function Tile({
           </span>
         </div>
       )}
-      <div className="absolute right-3 bottom-3 left-3 flex w-fit max-w-full items-center gap-2 rounded-control bg-overlay px-3 py-1 backdrop-blur-md">
+      <div className="absolute right-1 bottom-1 left-1 flex w-fit max-w-full items-center gap-2 rounded-control bg-overlay px-3 py-1 backdrop-blur-md">
         <span className="truncate">{screen ? `${name} 的螢幕` : name}</span>
         {!screen && micMuted && (
           <MicOffIcon aria-label="麥克風已關" className="size-4 shrink-0" />
@@ -480,7 +483,7 @@ function Tile({
         aria-pressed={pinned}
         onClick={onPin}
         className={cn(
-          "absolute top-3 right-3 bg-overlay backdrop-blur-md",
+          "absolute top-1 right-1 bg-overlay backdrop-blur-md",
           !pinned && "text-muted-foreground"
         )}
       >
@@ -554,8 +557,9 @@ function Controls({
 
   return (
     <TooltipProvider>
-      {/* 7 controls fit a 320px phone only with the smaller gap. */}
-      <div className="flex items-center gap-2 sm:gap-3">
+      {/* On a phone the bar's ends line up with the stage's edges and the
+          controls share what is left; 7 of them still fit 320px. */}
+      <div className="flex items-center gap-1 max-md:w-full max-md:justify-between md:gap-3">
         <RecordingState />
         <span className="contents max-md:hidden">
           <Divider />
@@ -934,7 +938,7 @@ function RecordingState() {
           <span
             role="status"
             className={cn(
-              "flex h-9 items-center gap-2 px-1",
+              "flex h-9 items-center gap-2 md:px-1",
               !recording && "text-muted-foreground",
               !recording && late && "text-destructive"
             )}
@@ -1137,7 +1141,7 @@ const PANEL_MIN = 320
 const PANEL_MAX = 800
 const PANEL_KEY = "meet.panel-width"
 /** The gutter between the stage and the panel. */
-const GUTTER = 24
+const GUTTER = 16
 
 function MeetingPanel({
   open,
@@ -1228,7 +1232,7 @@ function MeetingPanel({
           event.preventDefault()
           save(apply(width.current + (event.key === "ArrowLeft" ? 32 : -32)))
         }}
-        className="group absolute inset-y-0 left-0 hidden w-6 cursor-col-resize touch-none items-center justify-center outline-none md:flex"
+        className="group absolute inset-y-0 left-0 hidden w-4 cursor-col-resize touch-none items-center justify-center outline-none md:flex"
       >
         <span
           aria-hidden
@@ -1241,7 +1245,7 @@ function MeetingPanel({
       <aside
         aria-label="摘要與聊天"
         className={cn(
-          "flex h-full min-h-0 flex-1 flex-col rounded-control bg-muted md:ml-6 md:w-(--panel) md:transition-all md:duration-overlay",
+          "flex h-full min-h-0 flex-1 flex-col rounded-control bg-muted md:ml-4 md:w-(--panel) md:transition-all md:duration-overlay",
           dragging && "md:transition-none",
           open
             ? "opacity-100"

@@ -84,7 +84,7 @@ export function TileModeration({ participant }: { participant: Participant }) {
             variant="ghost"
             size="icon"
             aria-label={`管理 ${name}`}
-            className="absolute top-3 right-16 bg-overlay text-muted-foreground backdrop-blur-md"
+            className="absolute top-1 right-12 bg-overlay text-muted-foreground backdrop-blur-md"
           />
         }
       >

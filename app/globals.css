@@ -53,7 +53,7 @@
 :root {
   /* The meeting panel's width; the page sets it as it is dragged. */
   --panel: 400px;
-  --panel-outer: 424px;
+  --panel-outer: 416px;
   --radius: 1rem;
   --background: oklch(0.97 0.005 85);
   --foreground: oklch(0.25 0 0);

@@ -81,7 +81,7 @@ export function TileHand({
   return (
     <span
       aria-label={`舉手，第 ${place + 1} 位`}
-      className="absolute top-3 left-3 flex h-10 items-center gap-1 rounded-control bg-primary px-3 font-medium text-primary-foreground tabular-nums [&_svg]:size-4"
+      className="absolute top-1 left-1 flex h-10 items-center gap-1 rounded-control bg-primary px-3 font-medium text-primary-foreground tabular-nums [&_svg]:size-4"
     >
       <HandIcon aria-hidden />
       {place + 1}
