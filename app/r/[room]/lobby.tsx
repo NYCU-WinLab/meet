@@ -120,7 +120,7 @@ function Lobby({
     // The same frame as the meeting, with the lobby in its middle. The
     // preview narrows with a short window so everything fits; a very short
     // one scrolls instead of cutting it off.
-    <div className="fixed top-16 right-4 bottom-4 left-4 flex flex-col overflow-y-auto md:top-20">
+    <div className="fixed top-14 right-4 bottom-4 left-4 flex flex-col overflow-y-auto md:top-18">
       <div className="m-auto flex w-full max-w-2xl flex-col gap-6 short:max-w-md">
         <h1 className="text-title font-medium">{title}</h1>
         <Preview track={video} />
