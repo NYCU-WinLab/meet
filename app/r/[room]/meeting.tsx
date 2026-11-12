@@ -30,7 +30,6 @@ import {
   HandIcon,
   CircleDashedIcon,
   CaptionsIcon,
-  CaptionsOffIcon,
   CircleDotIcon,
   EllipsisIcon,
   LinkIcon,
@@ -39,7 +38,6 @@ import {
   MessagesSquareIcon,
   MicOffIcon,
   MonitorUpIcon,
-  MonitorXIcon,
   PinIcon,
   PinOffIcon,
   SignalLowIcon,
@@ -47,6 +45,8 @@ import {
   UserPlusIcon,
   VideoIcon,
   VideoOffIcon,
+  Volume2Icon,
+  VolumeOffIcon,
 } from "lucide-react"
 import { useParams, useRouter } from "next/navigation"
 import * as React from "react"
@@ -63,6 +63,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Toggle } from "@/components/ui/toggle"
 import {
   Tooltip,
   TooltipContent,
@@ -81,6 +82,7 @@ import {
 import { DeviceMenu } from "./device-menu"
 import { GuestInvite } from "./guest-invite"
 import { HostProvider, ModerationListener, TileModeration } from "./host"
+import { useLevel } from "./level"
 import type { MediaChoices } from "./lobby"
 import { ReactionListener, ReactionPicker, TileReactions } from "./reactions"
 import {
@@ -133,6 +135,13 @@ export function Meeting({
     summary?.agenda?.filter((item) => item.status === "pending").length ?? 0
   useAgendaReminder(endsAt, pending)
   const toggle = () => setOpen((was) => !was)
+  // Whether this member hears the meeting. Never remembered: a meeting that
+  // starts silent looks broken.
+  const [hearing, setHearing] = React.useState(true)
+  const sound = React.useMemo(
+    () => ({ hearing, toggle: () => setHearing((was) => !was) }),
+    [hearing]
+  )
   React.useEffect(() => {
     const show = () => setOpen(true)
     window.addEventListener(OPEN_CHAT_EVENT, show)
@@ -168,7 +177,7 @@ export function Meeting({
           }}
           className="fixed top-16 right-4 bottom-4 left-4 flex flex-col gap-6 md:top-20 md:flex-row md:gap-0"
         >
-          <RoomAudioRenderer />
+          <RoomAudioRenderer muted={!hearing} />
           <SummaryListener onSummary={setSummary} />
           <ModerationListener />
           <ReactionListener />
@@ -193,6 +202,7 @@ export function Meeting({
               pending={pending}
               invite={invite}
               guest={guest}
+              sound={sound}
             />
           </div>
           <ControlsInCorner
@@ -201,6 +211,7 @@ export function Meeting({
             pending={pending}
             invite={invite}
             guest={guest}
+            sound={sound}
           />
         </LiveKitRoom>
       </CaptionsProvider>
@@ -500,6 +511,7 @@ function Controls({
   pending,
   invite,
   guest,
+  sound,
 }: {
   open: boolean
   onToggle: () => void
@@ -509,10 +521,16 @@ function Controls({
   invite: boolean
   /** In through a guest link: no room microphone, no meeting link to copy. */
   guest: boolean
+  /** Whether this member hears the meeting, and the way to change it. */
+  sound: { hearing: boolean; toggle: () => void }
 }) {
   const room = useRoomContext()
-  const { isMicrophoneEnabled, isCameraEnabled, isScreenShareEnabled } =
-    useLocalParticipant()
+  const {
+    isMicrophoneEnabled,
+    isCameraEnabled,
+    isScreenShareEnabled,
+    microphoneTrack,
+  } = useLocalParticipant()
   const mic = useTrackToggle({ source: Track.Source.Microphone })
   const camera = useTrackToggle({ source: Track.Source.Camera })
   const hand = useMyHand()
@@ -542,14 +560,25 @@ function Controls({
           <Divider />
         </span>
         <div className="flex items-center gap-1">
-          <Control
-            label={`${isMicrophoneEnabled ? "關麥克風" : "開麥克風"}（${MOD}D）`}
-            active={isMicrophoneEnabled}
-            pending={mic.pending}
-            onClick={() => mic.toggle()}
-          >
-            {isMicrophoneEnabled ? <MicIcon /> : <MicOffIcon />}
-          </Control>
+          <span className="relative">
+            <Control
+              label={`${isMicrophoneEnabled ? "關麥克風" : "開麥克風"}（${MOD}D）`}
+              variant="alert"
+              pressed={isMicrophoneEnabled}
+              pending={mic.pending}
+              onClick={() => mic.toggle()}
+              offIcon={<MicOffIcon />}
+            >
+              <MicIcon />
+            </Control>
+            <MicLevel
+              track={
+                isMicrophoneEnabled
+                  ? microphoneTrack?.track?.mediaStreamTrack
+                  : undefined
+              }
+            />
+          </span>
           <span className="contents max-md:hidden">
             <DeviceMenu kind="audioinput" label="麥克風" />
           </span>
@@ -557,11 +586,13 @@ function Controls({
         <div className="flex items-center gap-1">
           <Control
             label={`${isCameraEnabled ? "關鏡頭" : "開鏡頭"}（${MOD}E）`}
-            active={isCameraEnabled}
+            variant="alert"
+            pressed={isCameraEnabled}
             pending={camera.pending}
             onClick={() => camera.toggle()}
+            offIcon={<VideoOffIcon />}
           >
-            {isCameraEnabled ? <VideoIcon /> : <VideoOffIcon />}
+            <VideoIcon />
           </Control>
           <span className="contents max-md:hidden">
             <DeviceMenu kind="videoinput" label="鏡頭" />
@@ -569,12 +600,21 @@ function Controls({
         </div>
         <div className="flex items-center gap-3 max-md:hidden">
           <Control
+            label={sound.hearing ? "關閉會議聲音" : "開啟會議聲音"}
+            variant="alert"
+            pressed={sound.hearing}
+            onClick={sound.toggle}
+            offIcon={<VolumeOffIcon />}
+          >
+            <Volume2Icon />
+          </Control>
+          <Control
             label={isScreenShareEnabled ? "停止分享螢幕" : "分享螢幕"}
-            active={isScreenShareEnabled}
+            pressed={isScreenShareEnabled}
             pending={screen.pending}
             onClick={() => screen.toggle()}
           >
-            {isScreenShareEnabled ? <MonitorXIcon /> : <MonitorUpIcon />}
+            <MonitorUpIcon />
           </Control>
         </div>
         <ReactionPicker />
@@ -584,7 +624,7 @@ function Controls({
           {!guest && (
             <Control
               label={hand.up ? "放下手" : "舉手"}
-              active={!hand.up}
+              pressed={hand.up}
               onClick={() => void hand.set(!hand.up)}
             >
               <HandIcon />
@@ -597,8 +637,8 @@ function Controls({
             (open ? "收起摘要與聊天" : "摘要與聊天") +
             (pending > 0 ? `，未討論 ${pending}` : "")
           }
-          active={open}
-          badge={pending > 0 ? pending : undefined}
+          pressed={open}
+          badge={pending}
           onClick={onToggle}
         >
           <MessagesSquareIcon />
@@ -607,6 +647,7 @@ function Controls({
           hand={hand}
           sharing={isScreenShareEnabled}
           onShare={() => screen.toggle()}
+          sound={sound}
           guest={guest}
           onInvite={invite ? () => setInviting(true) : undefined}
         />
@@ -680,12 +721,14 @@ function MoreMenu({
   hand,
   sharing,
   onShare,
+  sound,
   guest,
   onInvite,
 }: {
   hand: ReturnType<typeof useMyHand>
   sharing: boolean
   onShare: () => void
+  sound: { hearing: boolean; toggle: () => void }
   guest: boolean
   /** Opens the guest link form; members only. */
   onInvite?: () => void
@@ -740,13 +783,17 @@ function MoreMenu({
             {hand.up ? "放下手" : "舉手"}
           </DropdownMenuItem>
         )}
+        <DropdownMenuItem onClick={sound.toggle}>
+          {sound.hearing ? <Volume2Icon /> : <VolumeOffIcon />}
+          {sound.hearing ? "關閉會議聲音" : "開啟會議聲音"}
+        </DropdownMenuItem>
         <DropdownMenuItem onClick={captions.toggle}>
-          {captions.on ? <CaptionsOffIcon /> : <CaptionsIcon />}
+          <CaptionsIcon />
           {captions.on ? "關閉字幕" : "字幕"}
         </DropdownMenuItem>
         {canShare && (
           <DropdownMenuItem onClick={onShare}>
-            {sharing ? <MonitorXIcon /> : <MonitorUpIcon />}
+            <MonitorUpIcon />
             {sharing ? "停止分享螢幕" : "分享螢幕"}
           </DropdownMenuItem>
         )}
@@ -834,13 +881,17 @@ function Reconnecting() {
   const lost =
     state === ConnectionState.Reconnecting ||
     state === ConnectionState.SignalReconnecting
-  if (!lost) return null
+  // Always mounted, so it slides away the way it slid in.
   return (
     <div
       role="status"
-      className="fixed inset-x-0 top-0 z-50 flex justify-center bg-destructive py-1 text-primary-foreground"
+      aria-hidden={!lost}
+      className={cn(
+        "fixed inset-x-0 top-0 z-50 flex justify-center bg-destructive py-1 text-primary-foreground transition-all duration-overlay motion-reduce:translate-y-0",
+        !lost && "-translate-y-full opacity-0"
+      )}
     >
-      連線中斷，重新連線中
+      {lost && "連線中斷，重新連線中"}
     </div>
   )
 }
@@ -917,49 +968,100 @@ const Divider = () => (
   <span aria-hidden className="mx-1 h-6 w-px shrink-0 bg-border" />
 )
 
+// One control in the bar: a toggle whose fill and icon say its state, with
+// a tip that names what pressing it does.
 function Control({
   label,
-  active,
+  pressed,
+  variant,
   pending,
   badge,
   onClick,
+  offIcon,
   children,
 }: {
   label: string
-  active: boolean
+  pressed: boolean
+  /** "alert" for a device: off is what stands out. */
+  variant?: "default" | "alert"
   pending?: boolean
-  /** A count in the corner, e.g. agenda items left. */
+  /** A count in the corner, e.g. agenda items left; 0 hides it. */
   badge?: number
   onClick: () => void
+  /** The icon while off, when the two states have their own. */
+  offIcon?: React.ReactNode
   children: React.ReactNode
 }) {
   return (
     <Tooltip>
       <TooltipTrigger
         render={
-          <Button
-            variant={active ? "outline" : "default"}
-            size="icon"
+          <Toggle
+            variant={variant}
+            pressed={pressed}
             aria-label={label}
-            aria-pressed={active}
             disabled={pending}
-            onClick={onClick}
+            onPressedChange={() => onClick()}
+            offIcon={offIcon}
             className={badge === undefined ? undefined : "relative"}
           />
         }
       >
         {children}
         {badge !== undefined && (
-          <span
-            aria-hidden
-            className="absolute -top-2 -right-2 flex size-5 items-center justify-center rounded-full bg-destructive text-primary-foreground tabular-nums"
-          >
-            {badge}
-          </span>
+          <CountBadge count={badge} className="absolute -top-2 -right-2" />
         )}
       </TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>
     </Tooltip>
+  )
+}
+
+// A count that grows in and shrinks out. It keeps the last number while it
+// leaves, so the digit does not vanish before the dot does.
+function CountBadge({
+  count,
+  label,
+  className,
+}: {
+  count: number
+  /** Read aloud instead of the bare number. */
+  label?: string
+  className?: string
+}) {
+  const [shown, setShown] = React.useState(count)
+  if (count > 0 && count !== shown) setShown(count)
+  return (
+    <span
+      aria-hidden={label === undefined || count === 0}
+      aria-label={count > 0 ? label : undefined}
+      className={cn(
+        "flex size-5 items-center justify-center rounded-full bg-destructive text-primary-foreground tabular-nums transition-all duration-state motion-reduce:scale-100",
+        count === 0 && "scale-0 opacity-0",
+        className
+      )}
+    >
+      {shown}
+    </span>
+  )
+}
+
+// The member's own voice, as a tint that rises inside the microphone
+// control: proof the right microphone is picked up, without asking anyone.
+function MicLevel({ track }: { track?: MediaStreamTrack }) {
+  const bar = React.useRef<HTMLSpanElement>(null)
+  useLevel(track, bar, "y")
+  return (
+    <span
+      aria-hidden
+      className="pointer-events-none absolute inset-0 overflow-hidden rounded-control"
+    >
+      <span
+        ref={bar}
+        data-slot="mic-level"
+        className="absolute inset-0 origin-bottom scale-y-0 bg-primary/25"
+      />
+    </span>
   )
 }
 
@@ -1249,14 +1351,11 @@ function PanelTabs({
           <TabsTrigger value="summary">摘要</TabsTrigger>
           <TabsTrigger value="chat">
             聊天
-            {unread > 0 && (
-              <span
-                aria-label={`${unread} 則未讀`}
-                className="flex size-5 items-center justify-center rounded-full bg-destructive text-primary-foreground tabular-nums"
-              >
-                {unread}
-              </span>
-            )}
+            <CountBadge
+              count={unread}
+              label={`${unread} 則未讀`}
+              className={unread === 0 ? "-ml-7" : undefined}
+            />
           </TabsTrigger>
         </TabsList>
         <Tooltip>

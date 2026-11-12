@@ -25,6 +25,7 @@ import { createPortal } from "react-dom"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
+import { Toggle } from "@/components/ui/toggle"
 import {
   Tooltip,
   TooltipContent,
@@ -181,12 +182,10 @@ export function PipControl() {
       <Tooltip>
         <TooltipTrigger
           render={
-            <Button
-              variant={active ? "default" : "outline"}
-              size="icon"
+            <Toggle
+              pressed={active}
               aria-label={active ? "關閉子母畫面" : "子母畫面"}
-              aria-pressed={active}
-              onClick={() => (active ? close() : void open())}
+              onPressedChange={() => (active ? close() : void open())}
             />
           }
         >
@@ -239,16 +238,16 @@ function PipView({
           {name}
         </span>
         <span className="flex-1" />
-        <Button
-          variant={isMicrophoneEnabled ? "outline" : "default"}
-          size="icon"
+        <Toggle
+          variant="alert"
+          pressed={isMicrophoneEnabled}
           aria-label={isMicrophoneEnabled ? "關麥克風" : "開麥克風"}
-          aria-pressed={isMicrophoneEnabled}
           disabled={mic.pending}
-          onClick={() => mic.toggle()}
+          onPressedChange={() => void mic.toggle()}
+          offIcon={<MicOffIcon />}
         >
-          {isMicrophoneEnabled ? <MicIcon /> : <MicOffIcon />}
-        </Button>
+          <MicIcon />
+        </Toggle>
         <Button
           variant="destructive"
           size="icon"
