@@ -1,6 +1,8 @@
 // What meet reads from portal with its API key: the lab's project groups
 // (the slug files a recording under the right project, and its members
-// may open that project's recordings) and a booking's agenda when its room opens.
+// may open that project's recordings), the bookings a member was invited
+// to (they may open those recordings too) and a booking's agenda when its
+// room opens.
 import { agendaList, type AgendaIn } from "@/lib/agenda"
 
 export type ProjectGroup = { name: string; label: string }
@@ -63,6 +65,43 @@ async function fetchGroups(key: string): Promise<GroupMembers[]> {
     .sort((a, b) => a.label.localeCompare(b.label, "zh-TW"))
   cache = { at: Date.now(), groups }
   return groups
+}
+
+const invites = new Map<string, { at: number; bookings: string[] }>()
+const inviteTtl = 60 * 1000
+
+/** The booking ids (room-booking-…) whose attendees list this username;
+ * throws when portal does not answer within 5 seconds. */
+export async function invitedBookings(username: string): Promise<string[]> {
+  const cached = invites.get(username)
+  if (cached && Date.now() - cached.at < inviteTtl) return cached.bookings
+  const key = process.env.PORTAL_API_KEY
+  if (!key) return []
+  if (Date.now() - failedAt < 60_000) throw new Error("portal 剛才沒有回應")
+  try {
+    const response = await fetch(
+      "https://portal.winlab.tw/api/actions/list_invited_bookings",
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${key}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ username }),
+        signal: AbortSignal.timeout(5000),
+      }
+    )
+    if (!response.ok) throw new Error(`portal ${response.status}`)
+    const data = (await response.json()) as { bookings?: unknown }
+    const bookings = Array.isArray(data.bookings)
+      ? data.bookings.filter((b): b is string => typeof b === "string")
+      : []
+    invites.set(username, { at: Date.now(), bookings })
+    return bookings
+  } catch (error) {
+    failedAt = Date.now()
+    throw error
+  }
 }
 
 export type BookingAgenda = {

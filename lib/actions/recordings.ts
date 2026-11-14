@@ -30,7 +30,7 @@ import {
   readText,
 } from "@/lib/nextcloud"
 import { emitErrorLog } from "@/lib/otel"
-import { groupMembers } from "@/lib/portal"
+import { groupMembers, invitedBookings } from "@/lib/portal"
 import { parseSrt } from "@/lib/srt"
 
 /** A stretch with no member in the room, in seconds. */
@@ -176,8 +176,8 @@ export const recordingGaps = defineAction({
 //
 // Filed by the egress uploader (file_recording) once the MP4 is in
 // Nextcloud. A member may open a recording when they were in the room
-// while it ran, when it is filed under a project group they are in, or
-// when they opened or booked the room.
+// while it ran, when it is filed under a project group they are in, when
+// they opened or booked the room, or when the booking invited them.
 
 export type Recording = typeof recording.$inferSelect
 
@@ -245,6 +245,18 @@ async function myGroups(name: string) {
     return [...groups].filter(([, m]) => m.includes(name)).map(([g]) => g)
   } catch (error) {
     emitErrorLog(error, { source: "portal groups" })
+    return []
+  }
+}
+
+/** The bookings this member was invited to; none when portal does not
+ * answer. */
+async function myInvites(name: string) {
+  if (!name) return [] as string[]
+  try {
+    return await invitedBookings(name)
+  } catch (error) {
+    emitErrorLog(error, { source: "portal invites" })
     return []
   }
 }
@@ -325,6 +337,8 @@ async function access(actor: Actor, rec: Recording) {
   const name = await username(actor)
   if (name && rec.opener === name) return "opener"
   if (rec.group && (await myGroups(name)).includes(rec.group)) return "group"
+  if (rec.booking && (await myInvites(name)).includes(rec.booking))
+    return "invited"
   const spans = await presence(actor.userId, [rec.room])
   return attended(spans.get(rec.room), rec) ? "attended" : null
 }
@@ -340,10 +354,10 @@ async function mine(actor: Actor, recordingId: string) {
 }
 
 /** The recordings this member may open, newest first: rooms they opened
- * or booked, their project groups' rooms, and rooms they were in while the
- * recording ran. */
+ * or booked, their project groups' rooms, bookings that invited them, and
+ * rooms they were in while the recording ran. */
 async function visibleRecordings(userId: string, name: string) {
-  const groups = await myGroups(name)
+  const [groups, invited] = await Promise.all([myGroups(name), myInvites(name)])
   const joined = await db
     .selectDistinct({ room: livekitEvent.room })
     .from(livekitEvent)
@@ -357,6 +371,7 @@ async function visibleRecordings(userId: string, name: string) {
   const conditions = [
     ...(name ? [eq(recording.opener, name)] : []),
     ...(groups.length ? [inArray(recording.group, groups)] : []),
+    ...(invited.length ? [inArray(recording.booking, invited)] : []),
     ...(rooms.length ? [inArray(recording.room, rooms)] : []),
   ]
   if (conditions.length === 0) return []
@@ -370,6 +385,7 @@ async function visibleRecordings(userId: string, name: string) {
     (rec) =>
       (name && rec.opener === name) ||
       (rec.group && groups.includes(rec.group)) ||
+      (rec.booking && invited.includes(rec.booking)) ||
       attended(spans.get(rec.room), rec)
   )
 }
@@ -378,7 +394,7 @@ export const listMyRecordings = defineAction({
   name: "list_my_recordings",
   title: "我的會議紀錄",
   description:
-    "The signed-in member's meeting recordings, newest first: the ones of rooms they were in while it recorded, of project groups they are in, and of rooms they opened or booked. Each has id, title, group, opener, startedAt, endedAt and bytes; get_recording gives its files, notes and GitLab record.",
+    "The signed-in member's meeting recordings, newest first: the ones of rooms they were in while it recorded, of project groups they are in, of bookings that invited them, and of rooms they opened or booked. Each has id, title, group, opener, startedAt, endedAt and bytes; get_recording gives its files, notes and GitLab record.",
   kind: "query",
   input: z.object({ limit: z.number().int().min(1).max(200).default(100) }),
   async run(actor, { limit }) {
