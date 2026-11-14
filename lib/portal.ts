@@ -69,6 +69,8 @@ async function fetchGroups(key: string): Promise<GroupMembers[]> {
 
 const invites = new Map<string, { at: number; bookings: string[] }>()
 const inviteTtl = 60 * 1000
+/** Its own backoff: a failing invite lookup never blocks the groups. */
+let invitesFailedAt = 0
 
 /** The booking ids (room-booking-…) whose attendees list this username;
  * throws when portal does not answer within 5 seconds. */
@@ -77,7 +79,8 @@ export async function invitedBookings(username: string): Promise<string[]> {
   if (cached && Date.now() - cached.at < inviteTtl) return cached.bookings
   const key = process.env.PORTAL_API_KEY
   if (!key) return []
-  if (Date.now() - failedAt < 60_000) throw new Error("portal 剛才沒有回應")
+  if (Date.now() - invitesFailedAt < 60_000)
+    throw new Error("portal 剛才沒有回應")
   try {
     const response = await fetch(
       "https://portal.winlab.tw/api/actions/list_invited_bookings",
@@ -99,7 +102,7 @@ export async function invitedBookings(username: string): Promise<string[]> {
     invites.set(username, { at: Date.now(), bookings })
     return bookings
   } catch (error) {
-    failedAt = Date.now()
+    invitesFailedAt = Date.now()
     throw error
   }
 }
