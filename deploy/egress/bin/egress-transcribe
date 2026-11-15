@@ -9,6 +9,35 @@ set -u
 STATE=/var/lib/egress-transcribe
 AUTH="$NC_USER:$NC_PASS"
 DAV="$NC_URL/remote.php/dav/files/$NC_USER"
+
+# PUTs a file to Nextcloud and prints the HTTP status. The server refuses one
+# request over about 1 GB (413), so a file over 500 MB goes up as 100 MB
+# chunks (Nextcloud chunked upload v2) and is assembled with a MOVE. Same
+# function in egress-upload and egress-transcribe.
+nc_put() { # <local> <url under $DAV>
+  local src=$1 dest=$2 size up n part code
+  size=$(stat -c %s "$src")
+  if [ "$size" -le 524288000 ]; then
+    curl -g -sS -o /dev/null -w "%{http_code}" -u "$AUTH" -T "$src" "$dest"; return
+  fi
+  up="$NC_URL/remote.php/dav/uploads/$NC_USER/egress-$(date +%s)-$$"
+  code=$(curl -g -sS -o /dev/null -w "%{http_code}" -u "$AUTH" -X MKCOL -H "Destination: $dest" "$up")
+  [ "$code" = 201 ] || { echo "$code"; return; }
+  part=$(mktemp)
+  for ((n = 0; n * 104857600 < size; n++)); do
+    dd if="$src" of="$part" bs=1M skip=$((n * 100)) count=100 status=none
+    code=$(curl -g -sS -o /dev/null -w "%{http_code}" -u "$AUTH" -T "$part" \
+      -H "Destination: $dest" -H "OC-Total-Length: $size" "$up/$(printf %05d $((n + 1)))")
+    [ "$code" = 201 ] || [ "$code" = 204 ] || break
+  done
+  rm -f "$part"
+  if [ "$code" = 201 ] || [ "$code" = 204 ]; then
+    code=$(curl -g -sS -o /dev/null -w "%{http_code}" -u "$AUTH" -X MOVE \
+      -H "Destination: $dest" -H "OC-Total-Length: $size" "$up/.file")
+  fi
+  [ "$code" = 201 ] || [ "$code" = 204 ] || curl -g -sS -o /dev/null -u "$AUTH" -X DELETE "$up"
+  echo "$code"
+}
 TX=${TX_URL:-https://transcribe.winlab.tw}
 shopt -s nullglob
 
@@ -106,10 +135,18 @@ tx() { curl -g -sS -H "Authorization: Bearer $TX_TOKEN" "$@"; }
 # Sends a file to transcribe; prints the job id, or logs why it failed and
 # returns 1. Same function in egress-upload.
 tx_submit() { # <file>
-  local out code
+  local out code src=$1 audio=
+  # transcribe's proxy fails on uploads over about 1.3 GB (500), and it only
+  # needs the sound: a file over 500 MB goes as its audio track alone.
+  if [ "$(stat -c %s "$1")" -gt 524288000 ]; then
+    audio=$(mktemp --suffix=.m4a)
+    if ffmpeg -nostdin -loglevel error -y -i "$1" -vn -c:a copy "$audio"; then src=$audio
+    else echo "audio extract failed, sending the whole file: $1" >&2; fi
+  fi
   out=$(mktemp)
   code=$(curl -g -sS -o "$out" -w "%{http_code}" --max-time 1800 -H "Authorization: Bearer $TX_TOKEN" \
-    -F "file=@$1" -F language=zh -F diarize=true "$TX/api/jobs")
+    -F "file=@$src" -F language=zh -F diarize=true "$TX/api/jobs")
+  [ -z "$audio" ] || rm -f "$audio"
   if python3 -c 'import json,sys; j=json.load(open(sys.argv[1])).get("job_id",""); print(j); sys.exit(0 if j else 1)' "$out" 2>/dev/null; then
     rm -f "$out"; return 0
   fi
@@ -138,7 +175,7 @@ resubmit() { # <pending>; needs the pending file's fields in scope
 }
 put() { # put <local> <remote path under NC_DIR>
   local code
-  code=$(curl -g -sS -o /dev/null -w "%{http_code}" -u "$AUTH" -T "$1" "$DAV/$NC_DIR/$2")
+  code=$(nc_put "$1" "$DAV/$NC_DIR/$2")
   [ "$code" = 201 ] || [ "$code" = 204 ]
 }
 
