@@ -34,6 +34,13 @@ nc_put() { # <local> <url under $DAV>
   if [ "$code" = 201 ] || [ "$code" = 204 ]; then
     code=$(curl -g -sS -o /dev/null -w "%{http_code}" -u "$AUTH" -X MOVE \
       -H "Destination: $dest" -H "OC-Total-Length: $size" "$up/.file")
+    # Assembling a large file can outlast the proxy, which then answers an
+    # error while Nextcloud still finishes; a file of the right size counts.
+    for ((n = 0; n < 10; n++)); do
+      [ "$code" = 201 ] || [ "$code" = 204 ] && break
+      sleep 15
+      [ "$(curl -g -sS -I -u "$AUTH" "$dest" | awk 'tolower($1)=="content-length:" {print $2}' | tr -d '\r')" = "$size" ] && code=201
+    done
   fi
   [ "$code" = 201 ] || [ "$code" = 204 ] || curl -g -sS -o /dev/null -u "$AUTH" -X DELETE "$up"
   echo "$code"
