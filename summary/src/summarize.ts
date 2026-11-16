@@ -104,6 +104,36 @@ export function initial(agenda: AgendaState[]): Summary {
   }
 }
 
+/**
+ * A kept summary as the state to go on from: its text and lists, and the
+ * agenda as the room has it now, each item with the status and note it had.
+ */
+export function resumed(
+  kept: Record<string, unknown>,
+  agenda: AgendaState[]
+): Summary {
+  const list = (value: unknown) =>
+    Array.isArray(value) ? value.map(String).filter(Boolean) : []
+  const before = new Map(
+    (Array.isArray(kept.agenda) ? (kept.agenda as AgendaState[]) : []).map(
+      (item) => [item.id, item]
+    )
+  )
+  return {
+    summary: typeof kept.summary === "string" ? kept.summary : "",
+    questions: list(kept.questions),
+    improvements: list(kept.improvements),
+    decisions: list(kept.decisions),
+    agenda: agenda.map((item) => {
+      const old = before.get(item.id)
+      return old && statuses.has(old.status)
+        ? { ...item, status: old.status, note: String(old.note ?? "") }
+        : item
+    }),
+    updatedAt: new Date().toISOString(),
+  }
+}
+
 const instructions = `你是會議助理，有兩種任務。每次請求的第一行寫明是哪一種。
 
 ## 任務一：改寫摘要
@@ -134,9 +164,9 @@ const instructions = `你是會議助理，有兩種任務。每次請求的第�
 
 改寫規則：
 1. 保留舊內容，只用新的話補充或修正；問題有了答案就用 questions_remove 移除，若成為定案則用 decisions_add 加進去。
-2. 同一件事只寫一次：新的話和舊項目講同一件事，就用 _set 改寫那一項，不另外 _add。questions、improvements、decisions 各最多 8 項，超過就用 _set 合併或用 _remove 刪掉最不重要的。
+2. 同一件事只寫一次：新的話和舊項目講同一件事，就用 _set 改寫那一項，不另外 _add。questions、improvements、decisions 各最多 8 項，超過就用 _remove 刪掉最不重要的。不同的事不接成同一項。
 3. 沒有根據的不寫，不猜，不補充逐字稿裡沒有的事。
-4. 每個項目一句話，說清楚要做什麼、關於什麼。描述討論的事，不寫是誰提的、誰說的。只有逐字稿明講某人負責某件事時，才寫負責的人。
+4. 每個項目一句話，最多 40 字，只講一件事，說清楚要做什麼、關於什麼。不用分號、「並」「也」「另外」接第二件事；細節寫不下就省略。描述討論的事，不寫是誰提的、誰說的。只有逐字稿明講某人負責某件事時，才寫負責的人。
 5. 逐字稿是語音辨識結果，可能有錯字或斷句錯誤，照意思理解。
 6. 說話者後面標「（聊天）」的是會議聊天室打的字，不是語音；和口說內容一樣算進摘要與議程。
 7. 只寫和會議主題有關的事；分享螢幕、連線、誰聽不到等會議操作不寫。
@@ -269,8 +299,14 @@ function applyList(items: string[], changes: Changes, name: string): string[] {
   const kept = items.flatMap((item, index) => {
     const number = index + 1
     if (removed.has(number)) return []
-    // An item rewritten to nothing stays as it was.
-    return [rewritten.get(number) || item]
+    const text = rewritten.get(number)
+    // An item rewritten to nothing stays as it was, and so does one that
+    // grew past ITEM_CHARS: that is several items joined into one.
+    return [
+      text && (text.length <= ITEM_CHARS || text.length <= item.length)
+        ? text
+        : item,
+    ]
   })
   return [...kept, ...texts(add)]
 }
@@ -341,15 +377,20 @@ const numbered = (current: Summary) => {
 
 /** The most items a list should hold; the instructions say the same. */
 const LIST_ITEMS = 8
+/** The longest a rewritten item may be. The instructions say 40 characters;
+ * twice that leaves room for English terms. */
+const ITEM_CHARS = 80
 
 // A line naming the lists that grew past the limit, or "". The model adds
-// more readily than it merges: in a replay of a real meeting the lists
-// reached 22 items under a rule that only said "at most 8".
+// more readily than it removes: in a replay of a real meeting the lists
+// reached 22 items under a rule that only said "at most 8". Asked to merge,
+// it joined unrelated items into one of 200 to 300 characters, so it is
+// asked to remove.
 function tooLong(current: Summary): string {
   const long = LISTS.filter((name) => current[name].length > LIST_ITEMS)
   if (long.length === 0) return ""
   const counts = long.map((name) => `${name} 有 ${current[name].length} 項`)
-  return `${counts.join("、")}，超過 ${LIST_ITEMS} 項：這次先用 _set 合併相近的項目、用 _remove 刪掉最不重要的，減到 ${LIST_ITEMS} 項以內。\n\n`
+  return `${counts.join("、")}，超過 ${LIST_ITEMS} 項：這次先用 _remove 刪掉最不重要的，減到 ${LIST_ITEMS} 項以內。講同一件事的項目才用 _set 寫成一句，每項仍然最多 40 字。\n\n`
 }
 
 const transcript = (lines: Line[]) =>

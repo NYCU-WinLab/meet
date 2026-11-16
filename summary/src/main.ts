@@ -22,13 +22,14 @@ import { AccessToken, RoomServiceClient } from "livekit-server-sdk"
 import {
   answer,
   initial,
+  resumed,
   summarize,
   type AgendaState,
   type Summary,
 } from "./summarize.js"
 import { RoomMics } from "./room-mic.js"
 import { transcribeChunk } from "./transcribe.js"
-import { keepSummary } from "./usage.js"
+import { keepSummary, keptSummary } from "./usage.js"
 
 const url = need("LIVEKIT_URL")
 const apiKey = need("LIVEKIT_API_KEY")
@@ -83,7 +84,8 @@ type Line = {
 type Meeting = {
   room: Room
   name: string
-  /** When the service joined; with the name it keys the kept summary. */
+  /** When the service first joined; with the name it keys the kept
+   * summary. A meeting gone on from a kept summary takes its time. */
   joinedAt: number
   /** The room's title and project group, as meet wrote them. */
   title: string
@@ -219,6 +221,16 @@ async function join(name: string, metadata: string) {
     timer: setInterval(() => void refresh(meeting), summaryMs),
   }
   joined.set(name, meeting)
+  // Everyone left and came back, or the service restarted: go on from what
+  // was kept, so one meeting is one summary and not a new one from nothing.
+  const kept = await keptSummary(name)
+  if (kept) {
+    meeting.joinedAt = kept.startedAt
+    meeting.lines = kept.lines
+    meeting.seen = kept.lines.length
+    meeting.summary = resumed(kept.summary, agenda)
+    log(name, "resumed", { lines: kept.lines.length })
+  }
   const token = new AccessToken(apiKey, apiSecret, { identity, name: "摘要" })
   token.addGrant({
     room: name,
@@ -285,8 +297,9 @@ async function join(name: string, metadata: string) {
       dynacast: false,
     })
     log(name, "joined", { agenda: agenda.length })
-    // The checklist shows before anyone speaks.
-    if (agenda.length > 0) await publish(meeting)
+    // The checklist shows before anyone speaks, and so does a summary
+    // this meeting already had.
+    if (hasContent(meeting.summary)) await publish(meeting)
   } catch (error) {
     log(name, "connect failed", error)
     leave(meeting)
