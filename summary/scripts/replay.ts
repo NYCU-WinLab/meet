@@ -1,15 +1,18 @@
 // Replays the saved lines of a past meeting through summarize() and adds up
 // what the rewrites cost, to compare a prompt or timing change on real speech.
 //
-//   ANTHROPIC_API_KEY=... bun scripts/replay.ts lines.json [everyMs] [maxRewrites] [out.json]
+//   ANTHROPIC_API_KEY=... bun scripts/replay.ts lines.json [everyMs] [maxRewrites] [out.json] [kind]
+//
+// kind is paper to replay a lab meeting; without it the model decides.
 //
 // lines.json is the `lines` column of live_summaries: [{at, who, text}].
 import { readFileSync, writeFileSync } from "node:fs"
-import { initial, summarize } from "../src/summarize.js"
+import { initial, shown, summarize, type Kind } from "../src/summarize.js"
 
 type Line = { at: number; who: string; text: string }
 
-const [file, every = "45000", max = "1000", out] = process.argv.slice(2)
+const [file, every = "45000", max = "1000", out, kind = ""] =
+  process.argv.slice(2)
 if (!file) throw new Error("usage: replay.ts lines.json [everyMs] [max] [out]")
 const everyMs = Number(every)
 const batchLines = Number(process.env.SUMMARY_BATCH_LINES ?? 40)
@@ -49,7 +52,8 @@ globalThis.fetch = (async (...args: Parameters<typeof fetch>) => {
 
 const log = console.log
 console.log = () => {}
-let state = initial([])
+let state = initial([], kind as Kind | "")
+let seen = 0
 const started = Date.now()
 // A rewrite that fails keeps its lines for the next one, as the service does.
 let waiting: Line[] = []
@@ -58,6 +62,9 @@ for (const batch of batches.slice(0, Number(max))) {
   waiting.push(...batch)
   try {
     state = await summarize(state, waiting, "replay")
+    seen += waiting.length
+    // As the service does: undecided after 60 lines is a discussion.
+    if (!state.kind && seen >= 60) state = { ...state, kind: "discussion" }
     waiting = []
   } catch (error) {
     failures.push(String(error).slice(0, 120))
@@ -65,7 +72,7 @@ for (const batch of batches.slice(0, Number(max))) {
 }
 console.log = log
 
-if (out) writeFileSync(out, JSON.stringify(state, null, 2))
+if (out) writeFileSync(out, JSON.stringify(shown(state), null, 2))
 console.log(
   JSON.stringify({
     lines: batches.slice(0, Number(max)).flat().length,
@@ -74,8 +81,15 @@ console.log(
     seconds: Math.round((Date.now() - started) / 1000),
     failures,
     stateChars: JSON.stringify(state).length,
-    items: [state.questions, state.improvements, state.decisions].map(
-      (list) => list.length
+    kind: state.kind,
+    items: Object.fromEntries(
+      shown(state).sections.map(({ title, items }) => [title, items.length])
+    ),
+    longest: Math.max(
+      0,
+      ...shown(state).sections.flatMap(({ items }) =>
+        items.map((item) => item.length)
+      )
     ),
   })
 )

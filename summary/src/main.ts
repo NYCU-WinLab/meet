@@ -1,7 +1,7 @@
 // A running summary for every meeting. A hidden participant joins each room,
 // cuts every microphone and every screen share's audio into short chunks, has the lab's transcribe service
 // turn each chunk into text, and every so often asks a small model to rewrite
-// one summary state (summary, open questions, improvements, decisions) with
+// one summary state (a few lists that depend on the kind of meeting) with
 // the lines said since. The state goes to everyone in the room on the
 // meet.summary text stream. Audio is never written anywhere.
 import {
@@ -22,7 +22,9 @@ import { AccessToken, RoomServiceClient } from "livekit-server-sdk"
 import {
   answer,
   initial,
+  kindOf,
   resumed,
+  shown,
   summarize,
   type AgendaState,
   type Summary,
@@ -46,6 +48,8 @@ const labWords = (process.env.SUMMARY_GLOSSARY ?? "")
   .split(/[,，、\n]/)
   .map((word) => word.trim())
   .filter(Boolean)
+/** How many lines a meeting may go on without a kind. */
+const UNDECIDED_LINES = 60
 /** The most lines one rewrite reads; a backlog is folded in batch by batch. */
 const batchLines = Number(process.env.SUMMARY_BATCH_LINES ?? 40)
 
@@ -206,15 +210,17 @@ function agendaOf(raw: string): AgendaState[] {
 
 async function join(name: string, metadata: string) {
   const agenda = agendaOf(metadata)
+  const context = contextOf(metadata)
+  const kind = kindOf(context.group, agenda)
   const room = new Room()
   const meeting: Meeting = {
     room,
     name,
     joinedAt: Date.now(),
-    ...contextOf(metadata),
+    ...context,
     lines: [],
     seen: 0,
-    summary: initial(agenda),
+    summary: initial(agenda, kind),
     summarizing: false,
     roomMics: new RoomMics(),
     answering: false,
@@ -228,7 +234,7 @@ async function join(name: string, metadata: string) {
     meeting.joinedAt = kept.startedAt
     meeting.lines = kept.lines
     meeting.seen = kept.lines.length
-    meeting.summary = resumed(kept.summary, agenda)
+    meeting.summary = resumed(kept.summary, agenda, kind)
     log(name, "resumed", { lines: kept.lines.length })
   }
   const token = new AccessToken(apiKey, apiSecret, { identity, name: "摘要" })
@@ -420,7 +426,12 @@ async function refresh(meeting: Meeting) {
       glossaryOf(meeting)
     )
     meeting.seen += fresh.length
-    meeting.summary = next
+    // The model names the kind when it can tell. A meeting it still cannot
+    // place after UNDECIDED_LINES lines is a discussion.
+    meeting.summary =
+      !next.kind && meeting.seen >= UNDECIDED_LINES
+        ? { ...next, kind: "discussion" }
+        : next
     // Only a full batch still waiting is a backlog. Lines that came in while
     // this call ran wait for the next tick: folding them in right away made
     // the rewrites run back to back, one every 25 s for 2 lines each.
@@ -441,12 +452,14 @@ async function refresh(meeting: Meeting) {
 function keep(meeting: Meeting) {
   if (meeting.lines.length === 0) return
   const lines = [...meeting.lines].sort((a, b) => a.at - b.at)
-  keepSummary(meeting.name, meeting.joinedAt, meeting.summary, lines)
+  keepSummary(meeting.name, meeting.joinedAt, shown(meeting.summary), lines)
 }
 
 // Nothing to show yet: no words heard and no agenda.
 const hasContent = (summary: Summary) =>
-  summary.summary !== "" || summary.agenda.length > 0
+  summary.summary !== "" ||
+  summary.agenda.length > 0 ||
+  Object.values(summary.lists).some((list) => list.length > 0)
 
 // Answers one @agent question in the chat, and keeps the answer as a line
 // so the summary knows what was said.
@@ -489,7 +502,7 @@ async function ask(meeting: Meeting, who: string, said: string) {
 
 async function publish(meeting: Meeting) {
   await meeting.room.localParticipant?.sendText(
-    JSON.stringify(meeting.summary),
+    JSON.stringify(shown(meeting.summary)),
     { topic: TOPIC }
   )
   log(meeting.name, "published summary", meeting.summary.updatedAt)

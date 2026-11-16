@@ -1071,8 +1071,9 @@ function MicLevel({ track }: { track?: MediaStreamTrack }) {
 }
 
 // The running summary the summary service publishes on its text stream:
-// what the meeting is about, open questions, improvements, decisions. It is
-// rewritten every minute or so and sent again to anyone who joins late.
+// what the meeting is about and a few lists that depend on the kind of
+// meeting (a paper, a progress report, a discussion). It is rewritten every
+// minute or so and sent again to anyone who joins late.
 type AgendaItem = {
   id: string
   text: string
@@ -1083,10 +1084,14 @@ type AgendaItem = {
 
 type Summary = {
   summary: string
-  questions: string[]
-  improvements: string[]
-  decisions: string[]
-  /** Absent from a summary service older than the agenda. */
+  /** The lists of the meeting's kind, each with its heading. */
+  sections?: { title: string; items: string[] }[]
+  /** From a summary service older than the kinds, which has no sections. */
+  questions?: string[]
+  improvements?: string[]
+  decisions?: string[]
+  /** A paper meeting: who presents which paper. Not a checklist. */
+  about?: { text: string; url?: string }[]
   agenda?: AgendaItem[]
   updatedAt: string
 }
@@ -1420,14 +1425,20 @@ function SummaryPanel({ summary }: { summary: Summary | null }) {
       {summary?.agenda && summary.agenda.length > 0 && (
         <AgendaList items={summary.agenda} />
       )}
-      {!summary?.summary ? (
+      {summary?.about && summary.about.length > 0 && (
+        <SummaryList
+          title="論文"
+          items={summary.about.map(({ text }) => text)}
+        />
+      )}
+      {!summary || !heard(summary) ? (
         <p className="text-muted-foreground">開始說話後約 1 分鐘出現摘要</p>
       ) : (
         <>
-          <Markdown>{summary.summary}</Markdown>
-          <SummaryList title="問題" items={summary.questions} />
-          <SummaryList title="改進" items={summary.improvements} />
-          <SummaryList title="決議" items={summary.decisions} />
+          {summary.summary && <Markdown>{summary.summary}</Markdown>}
+          {sectionsOf(summary).map(({ title, items }) => (
+            <SummaryList key={title} title={title} items={items} />
+          ))}
           <p className="text-muted-foreground">
             更新於{" "}
             {new Date(summary.updatedAt).toLocaleTimeString("zh-TW", {
@@ -1441,6 +1452,19 @@ function SummaryPanel({ summary }: { summary: Summary | null }) {
     </section>
   )
 }
+
+/** The lists to show; a summary without sections has the 3 old lists. */
+const sectionsOf = (summary: Summary) =>
+  summary.sections ?? [
+    { title: "問題", items: summary.questions ?? [] },
+    { title: "改進", items: summary.improvements ?? [] },
+    { title: "決議", items: summary.decisions ?? [] },
+  ]
+
+/** Something was said: the summary has text or a list has an item. */
+const heard = (summary: Summary) =>
+  summary.summary !== "" ||
+  sectionsOf(summary).some(({ items }) => items.length > 0)
 
 const order = { pending: 0, partial: 1, done: 2 }
 const statusIcon = {

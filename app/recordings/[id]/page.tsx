@@ -32,23 +32,33 @@ const kinds: [suffix: string, label: string][] = [
 
 const agendaMark = { pending: "還沒談", partial: "談了一部分", done: "談完" }
 
-// The running summary from the meeting as Markdown: what it was about, then
-// each list it kept, then the agenda with how far each item got.
+// The running summary from the meeting as Markdown: the paper it was about
+// (a paper meeting), what it was about, each list it kept, then the agenda
+// with how far each item got. A summary kept before the kinds of meeting
+// has 3 lists under fixed names and no sections.
 function liveMarkdown(summary: Record<string, unknown>) {
   const list = (value: unknown) =>
     Array.isArray(value) ? value.map(String).filter(Boolean) : []
   const out: string[] = []
+  const about = Array.isArray(summary.about)
+    ? (summary.about as { text?: string }[]).map((item) => item.text ?? "")
+    : []
+  const sections = Array.isArray(summary.sections)
+    ? (summary.sections as { title?: string; items?: unknown }[]).map(
+        (section) => [section.title ?? "", list(section.items)] as const
+      )
+    : ([
+        ["決議", list(summary.decisions)],
+        ["待釐清", list(summary.questions)],
+        ["要改進", list(summary.improvements)],
+      ] as const)
+  if (about.length > 0)
+    out.push("### 論文", about.map((item) => `- ${item}`).join("\n"))
   if (typeof summary.summary === "string" && summary.summary)
     out.push(summary.summary)
-  for (const [key, title] of [
-    ["decisions", "決議"],
-    ["questions", "待釐清"],
-    ["improvements", "要改進"],
-  ] as const) {
-    const items = list(summary[key])
+  for (const [title, items] of sections)
     if (items.length > 0)
       out.push(`### ${title}`, items.map((item) => `- ${item}`).join("\n"))
-  }
   const agenda = Array.isArray(summary.agenda)
     ? (summary.agenda as { text?: string; status?: string; note?: string }[])
     : []
