@@ -1,6 +1,15 @@
 import { SpanStatusCode, trace } from "@opentelemetry/api"
 import { logs, SeverityNumber } from "@opentelemetry/api-logs"
 
+/** An expected refusal with a member-facing message: not a service fault, so
+ * its span stays unset instead of ERROR. */
+export class RefusalError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "RefusalError"
+  }
+}
+
 const tracer = trace.getTracer("meet")
 const logger = logs.getLogger("meet")
 
@@ -34,7 +43,15 @@ export async function traced<T>(
       return await fn()
     } catch (error) {
       span.recordException(error as Error)
-      span.setStatus({ code: SpanStatusCode.ERROR })
+      // Refusals and bad input are the caller's mistake, not a fault.
+      const expected =
+        error instanceof RefusalError || (error as Error)?.name === "ZodError"
+      if (!expected) span.setStatus({ code: SpanStatusCode.ERROR })
+      else span.setAttribute("action.refused", true)
+      span.setAttribute(
+        "error.message",
+        error instanceof Error ? error.message : String(error)
+      )
       throw error
     } finally {
       span.end()

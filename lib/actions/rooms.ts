@@ -20,7 +20,7 @@ import {
   unstamp,
   type RoomMetadata,
 } from "@/lib/livekit"
-import { emitErrorLog } from "@/lib/otel"
+import { emitErrorLog, RefusalError } from "@/lib/otel"
 
 // Room names are short ids in the link (/r/<name>), never typed; the title
 // members read is in the room's metadata.
@@ -63,7 +63,8 @@ const when = z.coerce.date()
 async function checkGroup(actor: Actor, name?: string) {
   if (!name || actor.service === "portal") return
   const groups = await projectGroups()
-  if (!groups.some((g) => g.name === name)) throw new Error("沒有這個專案群組")
+  if (!groups.some((g) => g.name === name))
+    throw new RefusalError("沒有這個專案群組")
 }
 
 /** A scheduled room opens 10 minutes early and its link dies an hour after. */
@@ -194,7 +195,7 @@ export const createRoomAction = defineAction({
 // schedules on a member's behalf, the username portal names.
 async function openerOf(actor: Actor, username?: string) {
   if (actor.service) {
-    if (!username) throw new Error("請填 opener")
+    if (!username) throw new RefusalError("請填 opener")
     const [row] = await db
       .select({ name: user.name })
       .from(user)
@@ -221,21 +222,28 @@ export const scheduleRoom = defineAction({
     agenda: agendaList.optional(),
   }),
   run: async (actor, input) => {
-    if (input.endsAt <= input.startsAt) throw new Error("結束要晚於開始")
+    if (input.endsAt <= input.startsAt) throw new RefusalError("結束要晚於開始")
     await checkGroup(actor, input.group)
     const who = await openerOf(actor, input.opener)
     const name = newRoomName()
-    await db.insert(scheduledRoom).values({
-      name,
-      title: input.title,
-      group: input.group ?? "",
-      booking: input.booking,
-      startsAt: input.startsAt,
-      endsAt: input.endsAt,
-      agenda: withIds(input.agenda ?? []),
-      ...who,
-    })
-    return { name, url: url(name) }
+    // The same booking id again is a retry: answer with the room it made.
+    const [made] = await db
+      .insert(scheduledRoom)
+      .values({
+        name,
+        title: input.title,
+        group: input.group ?? "",
+        booking: input.booking,
+        startsAt: input.startsAt,
+        endsAt: input.endsAt,
+        agenda: withIds(input.agenda ?? []),
+        ...who,
+      })
+      .onConflictDoNothing({ target: scheduledRoom.booking })
+      .returning({ name: scheduledRoom.name })
+    if (made) return { name, url: url(name) }
+    const existing = await scheduledByBooking(input.booking)
+    return { name: existing.name, url: url(existing.name) }
   },
 })
 
@@ -281,7 +289,7 @@ export const updateScheduledRoom = defineAction({
     await checkGroup(actor, input.group)
     const startsAt = input.startsAt ?? row.startsAt
     const endsAt = input.endsAt ?? row.endsAt
-    if (endsAt <= startsAt) throw new Error("結束要晚於開始")
+    if (endsAt <= startsAt) throw new RefusalError("結束要晚於開始")
     await db
       .update(scheduledRoom)
       .set({
