@@ -77,53 +77,139 @@ export type AgendaState = {
   note: string
 }
 
+/**
+ * What kind of meeting this is; it decides which lists the summary keeps.
+ * paper: one member presents a paper (the lab meeting). report: one or a
+ * few members report progress, the others ask and correct. discussion:
+ * several parties discuss, coordinate or review. "" until it is known.
+ */
+export type Kind = "paper" | "report" | "discussion"
+
+const LISTS = [
+  "points",
+  "qa",
+  "advice",
+  "decisions",
+  "todos",
+  "questions",
+] as const
+type ListName = (typeof LISTS)[number]
+
+/** The lists each kind keeps, in the order the page shows them, with the
+ * heading of each. The instructions describe the same lists. */
+export const KINDS: Record<Kind, [name: ListName, title: string][]> = {
+  paper: [
+    ["points", "重點"],
+    ["qa", "問答"],
+    ["advice", "報告建議"],
+  ],
+  report: [
+    ["points", "進度"],
+    ["qa", "問答"],
+    ["advice", "指正"],
+    ["todos", "待辦"],
+  ],
+  discussion: [
+    ["decisions", "結論"],
+    ["todos", "待辦"],
+    ["questions", "未決問題"],
+  ],
+}
+
 export type Summary = {
-  /** What the meeting has been about, a few short sentences. */
+  kind: Kind | ""
+  /** What the meeting is about, a few short sentences. A discussion keeps
+   * it; so does a meeting whose kind is not known yet. */
   summary: string
-  /** Questions raised and not yet answered. */
-  questions: string[]
-  /** Things someone said should change or improve. */
-  improvements: string[]
-  /** What was decided. */
-  decisions: string[]
+  /** Every list by name; a kind uses only its own. */
+  lists: Record<ListName, string[]>
   /** The booking's items; fixed, only their status and note change. */
   agenda: AgendaState[]
   /** ISO time of the last rewrite. */
   updatedAt: string
 }
 
+const noLists = () =>
+  Object.fromEntries(LISTS.map((name) => [name, [] as string[]])) as Record<
+    ListName,
+    string[]
+  >
+
+/** The lab meeting's group on portal, and the line its agenda carries. */
+const PAPER_GROUP = "lab-meeting"
+const PAPER_LINE = /^論文[：:]/
+
+/** The kind a room's booking already tells; "" leaves it to the model. */
+export const kindOf = (group: string, agenda: AgendaState[]): Kind | "" =>
+  group === PAPER_GROUP || agenda.some((item) => PAPER_LINE.test(item.text))
+    ? "paper"
+    : ""
+
 /** The state before anyone has spoken: only the agenda, all pending. */
-export function initial(agenda: AgendaState[]): Summary {
+export function initial(agenda: AgendaState[], kind: Kind | "" = ""): Summary {
   return {
+    kind,
     summary: "",
-    questions: [],
-    improvements: [],
-    decisions: [],
+    lists: noLists(),
     agenda,
     updatedAt: new Date().toISOString(),
   }
 }
 
 /**
- * A kept summary as the state to go on from: its text and lists, and the
- * agenda as the room has it now, each item with the status and note it had.
+ * The summary as the meeting page and the recording page read it: the
+ * state, plus the lists of its kind as sections with their headings. A
+ * paper's agenda is who presents which paper, not a checklist, so it goes
+ * out as `about` and the agenda is empty. The 3 empty lists are for pages
+ * opened before the kinds: they read them without checking.
+ */
+export function shown(current: Summary) {
+  const paper = current.kind === "paper"
+  return {
+    ...current,
+    agenda: paper ? [] : current.agenda,
+    about: paper
+      ? current.agenda.map(({ text, url }) => ({
+          text,
+          ...(url ? { url } : {}),
+        }))
+      : [],
+    sections: (current.kind ? KINDS[current.kind] : []).map(
+      ([name, title]) => ({ title, items: current.lists[name] })
+    ),
+    questions: [],
+    improvements: [],
+    decisions: [],
+  }
+}
+
+/**
+ * A kept summary as the state to go on from: its kind, text and lists, and
+ * the agenda as the room has it now, each item with the status and note it
+ * had. A summary kept before the kinds has none: its old lists are left
+ * behind and the kind is decided again.
  */
 export function resumed(
   kept: Record<string, unknown>,
-  agenda: AgendaState[]
+  agenda: AgendaState[],
+  kind: Kind | "" = ""
 ): Summary {
   const list = (value: unknown) =>
     Array.isArray(value) ? value.map(String).filter(Boolean) : []
+  const lists = (kept.lists ?? {}) as Record<string, unknown>
   const before = new Map(
     (Array.isArray(kept.agenda) ? (kept.agenda as AgendaState[]) : []).map(
       (item) => [item.id, item]
     )
   )
   return {
+    kind:
+      kind ||
+      (kept.kind && String(kept.kind) in KINDS ? (kept.kind as Kind) : ""),
     summary: typeof kept.summary === "string" ? kept.summary : "",
-    questions: list(kept.questions),
-    improvements: list(kept.improvements),
-    decisions: list(kept.decisions),
+    lists: Object.fromEntries(
+      LISTS.map((name) => [name, list(lists[name])])
+    ) as Record<ListName, string[]>,
     agenda: agenda.map((item) => {
       const old = before.get(item.id)
       return old && statuses.has(old.status)
@@ -138,23 +224,43 @@ const instructions = `你是會議助理，有兩種任務。每次請求的第�
 
 ## 任務一：改寫摘要
 
-你會收到「目前的摘要狀態」和「這之後新說的話」。只輸出要改的地方，格式是 JSON，不加說明、不加 code fence。沒寫到的欄位和項目保持原樣，不要重抄沒變的內容。新的話沒有帶來要改的地方，就輸出 {}。
+你會收到「會議類型」、「目前的摘要狀態」和「這之後新說的話」。只輸出要改的地方，格式是 JSON，不加說明、不加 code fence。沒寫到的欄位和項目保持原樣，不要重抄沒變的內容。新的話沒有帶來要改的地方，就輸出 {}。
 
-狀態的欄位：
-- summary：這場會議在談什麼，最多 5 句
-- questions：提出但還沒有答案的問題
-- improvements：有人說要改、要補、要做得更好的事
-- decisions：已經定案的事
-- agenda：議程項目
+狀態裡每個清單的每一項有編號，例如 {"1":"…","2":"…"}。
 
-狀態裡 questions、improvements、decisions 的每一項有編號，例如 {"1":"…","2":"…"}。
-
-輸出的欄位，每一個都可以省略：
+輸出的欄位，每一個都可以省略。下面的「清單」換成清單的名字，例如 points_add：
 - summary：要改才寫，寫出整段新的文字。
-- questions_add、improvements_add、decisions_add：要新增的項目，例如 ["新項目"]。
-- questions_set、improvements_set、decisions_set：要改寫的項目，例如 {"2":"改寫後的句子"}，鍵是編號。
-- questions_remove、improvements_remove、decisions_remove：要移除的編號，例如 [3]。
+- 清單_add：要新增的項目，例如 ["新項目"]。
+- 清單_set：要改寫的項目，例如 {"2":"改寫後的句子"}，鍵是編號。
+- 清單_remove：要移除的編號，例如 [3]。
 - agenda：只列有變動的項目，每項 {id, status, note}。
+- kind：只有會議類型是「未定」時才寫。
+
+會議類型決定用哪些清單。只寫該類型的清單，其他清單不寫。
+
+類型 paper（論文報告：一個人報告一篇論文，聽眾提問，老師指導怎麼報告）：
+- points：論文的重點：要解決的問題、方法、結果。照報告的進度補上。
+- qa：聽眾的提問和得到的回答，一項寫成「問：…答：…」。還沒回答就寫「問：…（還沒回答）」，有了回答用 qa_set 補上。這個清單每項最多 60 字。
+- advice：對報告方式的建議：投影片、講解順序、用詞、速度。同一張圖或同一個概念的建議只寫一項。
+- 不寫 summary，不寫 agenda。
+
+類型 report（進度報告：實驗室內部的會，一個人或幾個人輪流報告做了什麼，老師或其他人提問、指正）：
+- points：報告的內容：做了什麼、結果是什麼。有幾個人報告時，每項開頭寫報告者的名字和冒號。
+- qa：和 paper 的 qa 相同。
+- advice：對報告內容或做法的指正：哪裡不對、哪裡要補、哪裡要改。
+- todos：會後要做的事。逐字稿明講了負責人或期限才寫上。
+- 不寫 summary。
+
+類型 discussion（討論：幾方一起討論、協調、審查。有外部單位參加的會，例如客戶、廠商、合作單位，或在談規格、時程、合約、分工的會，一律是 discussion，即使有人先報告進度）：
+- summary：這場會議在談什麼，最多 3 句。
+- decisions：已經定案的事。
+- todos：會後要做的事，包含要對方提供的東西。逐字稿明講了負責人或期限才寫上。
+- questions：提出但還沒有答案的問題。有了答案就用 questions_remove 移除；成為定案就用 decisions_add 加進去。
+
+類型 未定：
+- 只寫 summary（最多 3 句）和 agenda。
+- 聽得出是 report 還是 discussion 時，寫 kind。同一次輸出裡，用那個類型的清單寫出到目前為止的內容。
+- 聽不出來就不寫 kind。分不出 report 還是 discussion 時，寫 discussion。
 
 議程規則：
 1. 議程項目是固定的：不新增、不刪除、不改 id 和文字。
@@ -163,10 +269,10 @@ const instructions = `你是會議助理，有兩種任務。每次請求的第�
 4. 沒有明確談到的項目不要列出來。
 
 改寫規則：
-1. 保留舊內容，只用新的話補充或修正；問題有了答案就用 questions_remove 移除，若成為定案則用 decisions_add 加進去。
-2. 同一件事只寫一次：新的話和舊項目講同一件事，就用 _set 改寫那一項，不另外 _add。questions、improvements、decisions 各最多 8 項，超過就用 _remove 刪掉最不重要的。不同的事不接成同一項。
+1. 保留舊內容，只用新的話補充或修正。
+2. 同一件事只寫一次：新的話和舊項目講同一件事，就用 _set 改寫那一項，不另外 _add。每個清單最多 8 項，超過就用 _remove 刪掉最不重要的。不同的事不接成同一項。
 3. 沒有根據的不寫，不猜，不補充逐字稿裡沒有的事。
-4. 每個項目一句話，最多 40 字，只講一件事，說清楚要做什麼、關於什麼。不用分號、「並」「也」「另外」接第二件事；細節寫不下就省略。描述討論的事，不寫是誰提的、誰說的。只有逐字稿明講某人負責某件事時，才寫負責的人。
+4. 每個項目一句話，最多 40 字，只講一件事。不用分號、「並」「也」「另外」接第二件事；細節寫不下就省略。描述事情本身，不寫是誰提的、誰問的；只有上面寫明要寫名字的地方才寫名字。
 5. 逐字稿是語音辨識結果，可能有錯字或斷句錯誤，照意思理解。
 6. 說話者後面標「（聊天）」的是會議聊天室打的字，不是語音；和口說內容一樣算進摘要與議程。
 7. 只寫和會議主題有關的事；分享螢幕、連線、誰聽不到等會議操作不寫。
@@ -209,7 +315,7 @@ export async function summarize(
     [
       {
         role: "user",
-        content: `任務：改寫摘要\n\n${glossaryOf(glossary)}目前的摘要狀態：\n${JSON.stringify(numbered(current))}\n\n${tooLong(current)}這之後新說的話：\n${transcript(fresh)}`,
+        content: `任務：改寫摘要\n會議類型：${current.kind || "未定"}\n\n${glossaryOf(glossary)}目前的摘要狀態：\n${JSON.stringify(numbered(current))}\n\n${tooLong(current)}這之後新說的話：\n${transcript(fresh)}`,
       },
     ],
     // The summary never searches; the tool is listed only to keep the
@@ -250,8 +356,6 @@ export function firstObject(text: string): string {
  * nested as {add, set, remove} the model lost count of its braces. */
 type Changes = Record<string, unknown>
 
-const LISTS = ["questions", "improvements", "decisions"] as const
-
 /**
  * The state after the model's changes. The model writes only what changed,
  * so a rewrite costs a few new sentences and not the whole state again: on
@@ -259,18 +363,41 @@ const LISTS = ["questions", "improvements", "decisions"] as const
  * output tokens each.
  */
 export function applyChanges(current: Summary, changes: Changes): Summary {
+  // The model names the kind once, while it is not known, and never paper:
+  // that one comes from the booking.
+  const kind =
+    current.kind ||
+    (changes.kind === "report" || changes.kind === "discussion"
+      ? changes.kind
+      : "")
   const summary = Array.isArray(changes.summary)
     ? // The model sometimes answers the summary as a list of sentences.
       changes.summary.map(String).join("")
     : typeof changes.summary === "string"
       ? changes.summary
       : ""
+  const own = new Set(kind ? KINDS[kind].map(([name]) => name) : [])
   return {
-    summary: summary.trim() || current.summary,
-    ...(Object.fromEntries(
-      LISTS.map((name) => [name, applyList(current[name], changes, name)])
-    ) as Pick<Summary, (typeof LISTS)[number]>),
-    agenda: applyAgenda(current.agenda, changes.agenda),
+    kind,
+    // A paper and a report keep no text: what an undecided meeting wrote
+    // goes when the kind is known.
+    summary:
+      kind === "paper" || kind === "report"
+        ? ""
+        : summary.trim() || current.summary,
+    // Only the lists of the kind change; a field for another list is dropped.
+    lists: Object.fromEntries(
+      LISTS.map((name) => [
+        name,
+        own.has(name)
+          ? applyList(current.lists[name], changes, name)
+          : current.lists[name],
+      ])
+    ) as Record<ListName, string[]>,
+    agenda:
+      kind === "paper"
+        ? current.agenda
+        : applyAgenda(current.agenda, changes.agenda),
     updatedAt: new Date().toISOString(),
   }
 }
@@ -350,36 +477,47 @@ type Response = {
   usage: Usage
 }
 
-/** The state as the model sees it: no timestamp, no links. */
-const stateOf = (current: Summary) => ({
-  ...current,
-  updatedAt: undefined,
-  agenda: current.agenda.map(({ id, text, status, note }) => ({
-    id,
-    text,
-    status,
-    note,
-  })),
-})
-
-/** The state for a rewrite: each list item under its number, so the model
- * can name the one it changes. */
-const numbered = (current: Summary) => {
-  const byNumber = (items: string[]) =>
-    Object.fromEntries(items.map((item, index) => [index + 1, item]))
+/** The state as the model sees it: the text and the lists of its kind,
+ * and the agenda without links. A paper's agenda is not a checklist and a
+ * paper keeps no summary text, so neither is sent. */
+const stateOf = (
+  current: Summary,
+  items = (list: string[]): unknown => list
+) => {
+  const paper = current.kind === "paper"
   return {
-    ...stateOf(current),
-    questions: byNumber(current.questions),
-    improvements: byNumber(current.improvements),
-    decisions: byNumber(current.decisions),
+    ...(paper || current.kind === "report" ? {} : { summary: current.summary }),
+    ...Object.fromEntries(
+      (current.kind ? KINDS[current.kind] : []).map(([name]) => [
+        name,
+        items(current.lists[name]),
+      ])
+    ),
+    ...(paper
+      ? {}
+      : {
+          agenda: current.agenda.map(({ id, text, status, note }) => ({
+            id,
+            text,
+            status,
+            note,
+          })),
+        }),
   }
 }
 
+/** The state for a rewrite: each list item under its number, so the model
+ * can name the one it changes. */
+const numbered = (current: Summary) =>
+  stateOf(current, (list) =>
+    Object.fromEntries(list.map((item, index) => [index + 1, item]))
+  )
+
 /** The most items a list should hold; the instructions say the same. */
 const LIST_ITEMS = 8
-/** The longest a rewritten item may be. The instructions say 40 characters;
- * twice that leaves room for English terms. */
-const ITEM_CHARS = 80
+/** The longest a rewritten item may be. The instructions say 40 characters
+ * (60 for a question with its answer); 100 leaves room for English terms. */
+const ITEM_CHARS = 100
 
 // A line naming the lists that grew past the limit, or "". The model adds
 // more readily than it removes: in a replay of a real meeting the lists
@@ -387,10 +525,14 @@ const ITEM_CHARS = 80
 // it joined unrelated items into one of 200 to 300 characters, so it is
 // asked to remove.
 function tooLong(current: Summary): string {
-  const long = LISTS.filter((name) => current[name].length > LIST_ITEMS)
+  const long = (current.kind ? KINDS[current.kind] : [])
+    .map(([name]) => name)
+    .filter((name) => current.lists[name].length > LIST_ITEMS)
   if (long.length === 0) return ""
-  const counts = long.map((name) => `${name} 有 ${current[name].length} 項`)
-  return `${counts.join("、")}，超過 ${LIST_ITEMS} 項：這次先用 _remove 刪掉最不重要的，減到 ${LIST_ITEMS} 項以內。講同一件事的項目才用 _set 寫成一句，每項仍然最多 40 字。\n\n`
+  const counts = long.map(
+    (name) => `${name} 有 ${current.lists[name].length} 項`
+  )
+  return `${counts.join("、")}，超過 ${LIST_ITEMS} 項：這次先用 _remove 刪掉最不重要的，減到 ${LIST_ITEMS} 項以內。講同一件事的項目才用 _set 寫成一句，每項長度照規則。\n\n`
 }
 
 const transcript = (lines: Line[]) =>
@@ -477,7 +619,7 @@ export async function answer(
   const messages: { role: "user" | "assistant"; content: unknown }[] = [
     {
       role: "user",
-      content: `任務：回答提問\n\n${glossaryOf(glossary)}目前的摘要狀態：\n${JSON.stringify(stateOf(current))}\n\n最近的逐字稿：\n${transcript(recent) || "（還沒有人說話）"}\n\n${who} 問：${question}`,
+      content: `任務：回答提問\n會議類型：${current.kind || "未定"}\n\n${glossaryOf(glossary)}目前的摘要狀態：\n${JSON.stringify(stateOf(current))}\n\n最近的逐字稿：\n${transcript(recent) || "（還沒有人說話）"}\n\n${who} 問：${question}`,
     },
   ]
   let data = await call(messages, { type: "auto" })
