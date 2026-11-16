@@ -19,6 +19,7 @@ import {
 } from "@/lib/actions/guests"
 import { recordAiUsage } from "@/lib/actions/ai-usage"
 import {
+  getLiveSummary,
   matchRecordingSpeakers,
   saveLiveSummary,
 } from "@/lib/actions/live-summaries"
@@ -54,6 +55,7 @@ export const actions: Action[] = [
   dashboard,
   recordAiUsage,
   saveLiveSummary,
+  getLiveSummary,
   matchRecordingSpeakers,
   recordingGaps,
   fileRecording,

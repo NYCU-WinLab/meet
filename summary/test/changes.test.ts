@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test"
-import { applyChanges, firstObject, type Summary } from "../src/summarize.js"
+import {
+  applyChanges,
+  firstObject,
+  resumed,
+  type Summary,
+} from "../src/summarize.js"
 
 const state: Summary = {
   summary: "談 RCS2 的進度。",
@@ -51,6 +56,16 @@ describe("applyChanges", () => {
     expect(next.questions).toEqual(state.questions)
   })
 
+  test("an item rewritten into a long one stays as it was", () => {
+    const long = "補上延遲的量測；".repeat(12)
+    const next = applyChanges(state, {
+      improvements_set: { "1": long },
+      questions_set: { "1": "測試資料的筆數夠不夠？" },
+    })
+    expect(next.improvements).toEqual(state.improvements)
+    expect(next.questions[0]).toBe("測試資料的筆數夠不夠？")
+  })
+
   test("the agenda takes only the items listed", () => {
     const next = applyChanges(state, {
       agenda: [{ id: "a1", status: "done", note: "報告完成" }],
@@ -81,5 +96,34 @@ describe("firstObject", () => {
   test("an object that never closes is an error", () => {
     expect(() => firstObject('{"summary":"沒寫完')).toThrow("not JSON")
     expect(() => firstObject("沒有物件")).toThrow("not JSON")
+  })
+})
+
+describe("resumed", () => {
+  test("keeps the text and lists, and the status of items still listed", () => {
+    const kept = {
+      ...state,
+      agenda: [{ id: "a1", text: "進度", status: "done", note: "報告完成" }],
+    }
+    const next = resumed(kept, [
+      { id: "a1", text: "進度", status: "pending", note: "" },
+      { id: "b2", text: "預算", status: "pending", note: "" },
+    ])
+    expect(next.summary).toBe(state.summary)
+    expect(next.questions).toEqual(state.questions)
+    expect(next.agenda).toEqual([
+      { id: "a1", text: "進度", status: "done", note: "報告完成" },
+      { id: "b2", text: "預算", status: "pending", note: "" },
+    ])
+  })
+
+  test("a kept summary with fields missing is still a summary", () => {
+    expect(contentOf(resumed({}, []))).toEqual({
+      summary: "",
+      questions: [],
+      improvements: [],
+      decisions: [],
+      agenda: [],
+    })
   })
 })

@@ -1,4 +1,4 @@
-import { and, eq, gte, lte } from "drizzle-orm"
+import { and, desc, eq, gte, lte } from "drizzle-orm"
 import { z } from "zod"
 
 import { defineAction } from "@/lib/actions/define"
@@ -42,6 +42,40 @@ export const saveLiveSummary = defineAction({
   },
   // Every meeting sends one after each rewrite; nobody watches it live.
   quiet: true,
+})
+
+/** How long after its last rewrite a kept summary is still the same
+ * meeting: a room that empties for lunch and fills again goes on. */
+const RESUME_MS = 6 * 60 * 60 * 1000
+
+export const getLiveSummary = defineAction({
+  name: "get_live_summary",
+  title: "讀回即時摘要",
+  description:
+    "For the summary service: the running summary and lines it last kept for a room, when the last rewrite is under 6 hours old, or found false. The service reads it when it joins a room again (everyone left and came back, or the service restarted), so one meeting stays one summary. Summary service only.",
+  kind: "query",
+  input: z.object({ room: z.string().min(1).max(100) }),
+  async run(actor, input) {
+    if (actor.service !== "summary") throw new Error("只給摘要服務用")
+    const [row] = await db
+      .select()
+      .from(liveSummary)
+      .where(
+        and(
+          eq(liveSummary.room, input.room),
+          gte(liveSummary.updatedAt, new Date(Date.now() - RESUME_MS))
+        )
+      )
+      .orderBy(desc(liveSummary.updatedAt))
+      .limit(1)
+    if (!row) return { found: false as const }
+    return {
+      found: true as const,
+      startedAt: row.startedAt.toISOString(),
+      summary: row.summary,
+      lines: row.lines,
+    }
+  },
 })
 
 export const matchRecordingSpeakers = defineAction({
