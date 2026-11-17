@@ -244,8 +244,12 @@ export async function moderate(
     const devices = (await client.listParticipants(room)).filter(
       (p) => isMember(p) && memberOf(p.identity) === member
     )
-    for (const device of devices)
-      await client.removeParticipant(room, device.identity)
+    // A device that left on its own meanwhile is no reason to stop.
+    await Promise.all(
+      devices.map((d) =>
+        client.removeParticipant(room, d.identity).catch(() => null)
+      )
+    )
     return
   }
   if (action === "lower_hand") {
