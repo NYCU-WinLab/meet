@@ -1,0 +1,3 @@
+[test]
+# Fake service settings, read when src/summarize.ts loads.
+preload = ["./test/env.ts"]

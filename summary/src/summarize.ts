@@ -602,7 +602,8 @@ const QUESTION_LINES = 200
 /**
  * Answers one @agent question from the chat: the meeting from the summary
  * and the recent lines, anything else from a web search. Returns plain text
- * with up to 3 sources appended.
+ * with up to 3 sources appended, and, when it quotes past meetings, `to`:
+ * the people they were searched for, the only ones who may read it.
  */
 export async function answer(
   current: Summary,
@@ -611,10 +612,12 @@ export async function answer(
   question: string,
   room: string,
   /** The meet user ids of everyone in the room: search_meetings finds only
-   * meetings all of them may open, since the whole room reads the answer. */
-  members: string[],
+   * meetings all of them may open, since the whole room reads the answer.
+   * Read when the question arrives and again before the answer goes out. */
+  audience: () => string[],
   glossary: string[] = []
-): Promise<string> {
+): Promise<{ text: string; to?: string[] }> {
+  const members = audience()
   const recent = [...lines].sort((a, b) => a.at - b.at).slice(-QUESTION_LINES)
   const messages: { role: "user" | "assistant"; content: unknown }[] = [
     {
@@ -627,6 +630,7 @@ export async function answer(
   // A long search can pause the turn, and search_meetings runs here; send
   // the turn back until the model is done, at most 6 times.
   const recordings: string[] = []
+  let searched = false
   for (
     let i = 0;
     i < 6 &&
@@ -646,6 +650,7 @@ export async function answer(
               console.log(new Date().toISOString(), "search failed", error)
               return null
             })
+            if (hits?.length) searched = true
             for (const hit of hits ?? []) recordings.push(hit.url)
             return {
               type: "tool_result",
@@ -670,8 +675,15 @@ export async function answer(
     reportUsage(room, "answer", model, data.usage)
   }
   console.log(new Date().toISOString(), "answer usage", data.usage)
+  // Past meetings were searched for the people there when the question
+  // arrived. Someone who joined since, a guest or a member who may not open
+  // those meetings, would read them too, so the answer is dropped.
+  if (searched && audience().some((id) => !members.includes(id)))
+    return {
+      text: "剛有人加入，這題用到的過去會議不一定每個人都能看，請再問一次。",
+    }
   const text = textOf(data).trim()
-  if (!text) return "這題我答不出來，換個問法試試。"
+  if (!text) return { text: "這題我答不出來，換個問法試試。" }
   const sources = [
     ...new Set(
       data.content.flatMap((part) =>
@@ -683,5 +695,5 @@ export async function answer(
   const parts = [text]
   if (sources.length > 0) parts.push(`來源：\n${sources.join("\n")}`)
   if (watched.length > 0) parts.push(`相關錄影：\n${watched.join("\n")}`)
-  return parts.join("\n\n")
+  return { text: parts.join("\n\n"), ...(searched ? { to: members } : {}) }
 }
