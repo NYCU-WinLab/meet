@@ -14,6 +14,7 @@ import {
 } from "livekit-server-sdk"
 
 import type { AgendaItem } from "@/lib/agenda"
+import { memberOf } from "@/lib/participants"
 
 const url = () => process.env.LIVEKIT_URL!
 const apiKey = () => process.env.LIVEKIT_API_KEY!
@@ -238,7 +239,17 @@ export async function moderate(
   const target = await client.getParticipant(room, identity).catch(() => null)
   if (!target || !isMember(target)) throw new Error("房間裡沒有這位成員")
   if (action === "remove") {
-    await client.removeParticipant(room, identity)
+    // Removing a member takes every device they are in on.
+    const member = memberOf(identity)
+    const devices = (await client.listParticipants(room)).filter(
+      (p) => isMember(p) && memberOf(p.identity) === member
+    )
+    // A device that left on its own meanwhile is no reason to stop.
+    await Promise.all(
+      devices.map((d) =>
+        client.removeParticipant(room, d.identity).catch(() => null)
+      )
+    )
     return
   }
   if (action === "lower_hand") {

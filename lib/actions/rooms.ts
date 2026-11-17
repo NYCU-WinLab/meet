@@ -21,6 +21,7 @@ import {
   type RoomMetadata,
 } from "@/lib/livekit"
 import { emitErrorLog, RefusalError } from "@/lib/otel"
+import { deviceIdentity, memberOf } from "@/lib/participants"
 
 // Room names are short ids in the link (/r/<name>), never typed; the title
 // members read is in the room's metadata.
@@ -419,7 +420,7 @@ export const joinRoom = defineAction({
     }
     const credentials = await joinToken({
       room: input.name,
-      identity: me.id,
+      identity: deviceIdentity(me.id),
       name: me.name,
     })
     const host = isHost(
@@ -458,7 +459,7 @@ export const moderateParticipant = defineAction({
   name: "moderate_participant",
   title: "主持人管理",
   description:
-    "The room's host (the member who opened it) mutes another member's microphone, stops their camera, lowers their raised hand, or removes them from the room. identity is the member's LiveKit identity (their meet user id, from list_rooms participants). Anyone else gets an error.",
+    "The room's host (the member who opened it) mutes another member's microphone, stops their camera, lowers their raised hand, or removes them from the room. identity is one device's LiveKit identity (`<meet user id>.<device>`, from list_rooms participants); a member in on two devices has two. Anyone else gets an error.",
   kind: "mutation",
   input: z.object({
     name: roomName,
@@ -473,7 +474,7 @@ export const moderateParticipant = defineAction({
     if (!room) throw new Error("沒有這個會議室")
     if (!isHost(me.username, parseMetadata(room.metadata)))
       throw new Error("只有開會議室的人可以這樣做")
-    if (input.identity === me.id) throw new Error("不能對自己這樣做")
+    if (memberOf(input.identity) === me.id) throw new Error("不能對自己這樣做")
     await moderate(input.name, input.identity, input.action)
     return { done: true }
   },

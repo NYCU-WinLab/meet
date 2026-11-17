@@ -30,6 +30,7 @@ import {
   readText,
 } from "@/lib/nextcloud"
 import { emitErrorLog } from "@/lib/otel"
+import { memberOf } from "@/lib/participants"
 import { groupMembers, invitedBookings } from "@/lib/portal"
 import { parseSrt } from "@/lib/srt"
 
@@ -56,7 +57,8 @@ const isMember = (row: Presence) =>
 /**
  * The stretches between from and to when no member was in the room, from
  * the room's join and leave events in order. A member who reconnects joins
- * twice before the old session leaves, so each identity keeps a count.
+ * twice before the old session leaves, and one on two devices joins once
+ * per device, so each member keeps a count.
  */
 export function emptySpans(rows: Presence[], from: number, to: number) {
   const here = new Map<string, number>()
@@ -316,6 +318,9 @@ async function presence(userId: string, rooms: string[]) {
       // A leave also says how long they stayed, so a lost join still counts.
       const from = held?.from ?? at - (row.seconds ?? 0) * 1000
       add(row.room, from, at)
+      // Two devices interleave joins and leaves; the leave's own length
+      // keeps the first device's stretch whole.
+      if (row.seconds) add(row.room, at - row.seconds * 1000, at)
       open.delete(row.room)
     }
   }
@@ -623,7 +628,7 @@ async function searchable(actor: Actor, asUsers?: string[]) {
   }
   if (actor.service !== "summary" || !asUsers?.length)
     throw new Error("只給成員或摘要服務用")
-  const ids = [...new Set(asUsers)]
+  const ids = [...new Set(asUsers.map(memberOf))]
   // A test participant or a guest has an identity that is not a user id.
   const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
   if (!ids.every((id) => UUID.test(id))) return []

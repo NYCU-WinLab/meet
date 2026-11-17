@@ -21,7 +21,8 @@ export const livekitEvent = pgTable(
     at: timestamp({ withTimezone: true, mode: "date" }).notNull(),
     room: text(),
     roomSid: text(),
-    /** The member's identity, on participant events. */
+    /** On participant events: the member (meet user id, device part dropped),
+     * or the identity of a guest, the recorder or an agent. */
     participant: text(),
     /** How long they stayed, on participant_left. */
     participantSeconds: integer(),
