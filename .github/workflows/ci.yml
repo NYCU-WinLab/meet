@@ -19,6 +19,7 @@ jobs:
       - run: bun run actions:check
       - run: bun run build
       - run: cd summary && bun install --frozen-lockfile && bun run typecheck
+      - run: cd summary && bun run test
 
   # Builds the images once, runs deploy/smoke.sh against them and pushes
   # them as candidate-<tree>. promote makes them tree-<tree> once every job

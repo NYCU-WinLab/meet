@@ -5,6 +5,7 @@
   "scripts": {
     "build": "tsc -p .",
     "start": "node dist/main.js",
+    "test": "bun test",
     "typecheck": "tsc -p . --noEmit"
   },
   "dependencies": {
