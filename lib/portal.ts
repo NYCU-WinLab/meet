@@ -22,6 +22,9 @@ let failedAt = 0
 /** Fresh reads keep their own backoff, so a timed-out fresh read never makes
  * cold-cache playback, listing and search see no groups. */
 let freshFailedAt = 0
+/** The newest read that succeeded on each backoff channel. A failure older
+ * than that must not start a backoff: portal has answered since. */
+const okSeq = { groups: 0, freshGroups: 0, invites: 0, freshInvites: 0 }
 
 export async function projectGroups(): Promise<ProjectGroup[]> {
   return (await groupsWithMembers()).map(({ name, label }) => ({ name, label }))
@@ -42,18 +45,23 @@ async function groupsWithMembers(fresh = false): Promise<GroupMembers[]> {
   if (!key) return []
   if (Date.now() - (fresh ? freshFailedAt : failedAt) < 60_000)
     throw new Error("portal 剛才沒有回應")
+  const seq = ++readSeq
+  const channel = fresh ? "freshGroups" : "groups"
   try {
-    return await fetchGroups(key)
+    const groups = await fetchGroups(key, seq)
+    okSeq[channel] = Math.max(okSeq[channel], seq)
+    return groups
   } catch (error) {
-    if (fresh) freshFailedAt = Date.now()
-    else failedAt = Date.now()
+    if (okSeq[channel] < seq) {
+      if (fresh) freshFailedAt = Date.now()
+      else failedAt = Date.now()
+    }
     throw error
   }
 }
 
-async function fetchGroups(key: string): Promise<GroupMembers[]> {
+async function fetchGroups(key: string, seq: number): Promise<GroupMembers[]> {
   const startedAt = Date.now()
-  const seq = ++readSeq
   const response = await fetch(
     "https://portal.winlab.tw/api/actions/list_project_groups",
     {
@@ -111,6 +119,7 @@ export async function invitedBookings(
     throw new Error("portal 剛才沒有回應")
   const startedAt = Date.now()
   const seq = ++readSeq
+  const channel = options.fresh ? "freshInvites" : "invites"
   try {
     const response = await fetch(
       "https://portal.winlab.tw/api/actions/list_invited_bookings",
@@ -132,10 +141,13 @@ export async function invitedBookings(
     const latest = invites.get(username)
     if (!latest || latest.seq < seq)
       invites.set(username, { at: startedAt, seq, bookings })
+    okSeq[channel] = Math.max(okSeq[channel], seq)
     return bookings
   } catch (error) {
-    if (options.fresh) freshInvitesFailedAt = Date.now()
-    else invitesFailedAt = Date.now()
+    if (okSeq[channel] < seq) {
+      if (options.fresh) freshInvitesFailedAt = Date.now()
+      else invitesFailedAt = Date.now()
+    }
     throw error
   }
 }
