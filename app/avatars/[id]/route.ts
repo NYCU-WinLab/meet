@@ -2,7 +2,7 @@ import { runAction } from "@/lib/actions/define"
 import { memberAvatar } from "@/lib/actions/users"
 import { getSession } from "@/lib/auth/session"
 
-// A member's avatar for the chat, by their meet id (their LiveKit identity),
+// A member's avatar for the chat, by their meet id (their LiveKit identity before the dot),
 // from portal. Members only. The browser keeps it for 10 minutes; a member
 // with none gets a 404 and the page shows their initial.
 export const runtime = "nodejs"

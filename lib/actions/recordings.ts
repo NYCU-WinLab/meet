@@ -57,7 +57,8 @@ const isMember = (row: Presence) =>
 /**
  * The stretches between from and to when no member was in the room, from
  * the room's join and leave events in order. A member who reconnects joins
- * twice before the old session leaves, so each identity keeps a count.
+ * twice before the old session leaves, and one on two devices joins once
+ * per device, so each member keeps a count.
  */
 export function emptySpans(rows: Presence[], from: number, to: number) {
   const here = new Map<string, number>()

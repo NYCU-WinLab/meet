@@ -47,10 +47,15 @@ export function Chat({
 
   const people = React.useMemo<Person[]>(
     () => [
-      ...participants.map((p) => ({
-        identity: p.identity,
-        name: p.name || p.identity,
-      })),
+      // One entry per person, however many devices they are in on.
+      ...[
+        ...new Map(
+          participants.map((p) => [
+            memberOf(p.identity),
+            { identity: p.identity, name: p.name || p.identity },
+          ])
+        ).values(),
+      ],
       AGENT,
     ],
     [participants]
@@ -154,7 +159,9 @@ export function Chat({
         <li ref={bottom} aria-hidden />
       </ol>
       <Composer
-        people={people.filter((p) => p.identity !== localParticipant.identity)}
+        people={people.filter(
+          (p) => memberOf(p.identity) !== memberOf(localParticipant.identity)
+        )}
         disabled={isSending}
         onSend={(text) => {
           // Taking part in the chat is when to ask, not on join.
@@ -236,11 +243,13 @@ function senderOf(message: ReceivedChatMessage, me: string): Sender {
       agent: true,
     }
   const identity = message.from?.identity ?? null
+  // Per person, so a message from my phone is mine on my laptop too.
+  const member = identity && memberOf(identity)
   return {
-    key: identity ?? "unknown",
+    key: member || "unknown",
     identity,
     name: message.from?.name || identity || "某人",
-    mine: identity === me,
+    mine: !!member && member === memberOf(me),
     agent: false,
   }
 }

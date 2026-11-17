@@ -32,7 +32,7 @@ export const memberAvatar = defineAction({
   name: "member_avatar",
   title: "成員頭像",
   description:
-    "One member's avatar from portal as base64 WebP with its version, or null when they have none. user_id is a meet member id, the same as their LiveKit identity.",
+    "One member's avatar from portal as base64 WebP with its version, or null when they have none. user_id is a meet member id, the part of their LiveKit identity before the dot.",
   kind: "query",
   input: z.object({ user_id: z.string().min(1).max(64) }),
   run: async (_actor, input) => {
