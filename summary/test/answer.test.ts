@@ -23,16 +23,18 @@ const reply = (body: unknown) =>
 function fakeServices(
   hits: number,
   during: () => void,
-  access: () => Response = () => reply({ ok: true })
+  access: () => Response = () => reply({ ok: true }),
+  queries: string[] = ["RCS2"]
 ) {
   let turns = 0
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
     if (url.endsWith("/api/actions/search_recordings")) {
       during()
+      const { query } = JSON.parse(String(init?.body)) as { query: string }
       return reply({
         hits: Array.from({ length: hits }, () => ({
-          recordingId: "r1",
+          recordingId: queries.length > 1 ? query : "r1",
           title: "週會",
           startedAt: "2026-11-10T02:00:00.000Z",
           second: 42,
@@ -52,14 +54,12 @@ function fakeServices(
         ? {
             stop_reason: "tool_use",
             usage: {},
-            content: [
-              {
-                type: "tool_use",
-                id: "t1",
-                name: "search_meetings",
-                input: { query: "RCS2" },
-              },
-            ],
+            content: queries.map((query, i) => ({
+              type: "tool_use",
+              id: `t${i}`,
+              name: "search_meetings",
+              input: { query },
+            })),
           }
         : {
             stop_reason: "end_turn",
@@ -141,6 +141,52 @@ describe("check_recording_access before sending", () => {
       expect(sent.to).toBeUndefined()
     })
   }
+
+  for (const [name, access] of [
+    [
+      "a thrown fetch error",
+      () => {
+        throw new TypeError("fetch failed")
+      },
+    ],
+    [
+      "a timeout",
+      () => {
+        throw new DOMException("timed out", "TimeoutError")
+      },
+    ],
+    ["a malformed JSON body", () => new Response("not json")],
+    ["a body without ok", () => reply({})],
+  ] as const) {
+    test(`${name} suppresses the recording-derived answer`, async () => {
+      fakeServices(1, () => {}, access)
+      const sent = await respond([ALICE, BOB])
+      expect(checks.length).toBe(1)
+      expect(sent.text).not.toContain(SECRET)
+      expect(sent.text).not.toContain("/recordings/r1")
+      expect(sent.to).toBeUndefined()
+    })
+  }
+
+  test("every distinct recording id from several searches is checked", async () => {
+    fakeServices(
+      1,
+      () => {},
+      () => reply({ ok: true }),
+      ["r1", "r2", "r3"]
+    )
+    await ask([ALICE, BOB])
+    expect(checks.length).toBe(1)
+    expect([...checks[0].recordingIds].sort()).toEqual(["r1", "r2", "r3"])
+  })
+
+  test("the identities checked are the ones the answer goes to", async () => {
+    const room = [ALICE, BOB]
+    fakeServices(1, () => room.pop())
+    const sent = await respond(room)
+    expect(sent.to).toEqual([ALICE])
+    expect(checks.map((check) => check.asUsers)).toEqual([[ALICE]])
+  })
 
   test("no search hits means no check", async () => {
     fakeServices(0, () => {})
