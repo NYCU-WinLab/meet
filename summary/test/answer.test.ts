@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
+import { AGENT_ATTRIBUTE, CHAT_TOPIC, sendReply } from "../src/chat.js"
 import { answer, initial } from "../src/summarize.js"
 
 const ALICE = "11111111-1111-4111-8111-111111111111"
@@ -60,8 +61,9 @@ function fakeServices(hits: number, during: () => void) {
   }) as typeof fetch
 }
 
-const ask = (room: string[]) =>
+const respond = (room: string[]) =>
   answer(initial([]), [], "Alice", "RCS2 上次怎麼說？", "r", () => [...room])
+const ask = async (room: string[]) => (await respond(room)).text
 
 describe("answer and who reads it", () => {
   test("a guest who joins during the search does not get the results", async () => {
@@ -86,6 +88,12 @@ describe("answer and who reads it", () => {
     expect(text).toContain("https://meet.test/recordings/r1?t=42")
   })
 
+  test("an answer from past meetings names who it was searched for", async () => {
+    const room = [ALICE, BOB]
+    fakeServices(1, () => {})
+    expect((await respond(room)).to).toEqual([ALICE, BOB])
+  })
+
   test("someone leaving does not drop the answer", async () => {
     const room = [ALICE, BOB]
     fakeServices(1, () => room.pop())
@@ -95,6 +103,53 @@ describe("answer and who reads it", () => {
   test("a search with no hits is answered whoever joins", async () => {
     const room = [ALICE]
     fakeServices(0, () => room.push("guest-xyz"))
-    expect(await ask(room)).toBe("查不到。")
+    const sent = await respond(room)
+    expect(sent.text).toBe("查不到。")
+    expect(sent.to).toBeUndefined()
+  })
+})
+
+describe("sendReply", () => {
+  const sender = () => {
+    const calls: { text: string; options: unknown }[] = []
+    return {
+      calls,
+      sendText: async (text: string, options?: unknown) => {
+        calls.push({ text, options })
+        return {} as never
+      },
+    }
+  }
+
+  test("a searched answer goes only to the people it was searched for", async () => {
+    const room = [ALICE, BOB]
+    fakeServices(1, () => {})
+    const { text, to } = await respond(room)
+    const participant = sender()
+    await sendReply(participant, text, to)
+    expect(participant.calls).toEqual([
+      {
+        text,
+        options: {
+          topic: CHAT_TOPIC,
+          attributes: { [AGENT_ATTRIBUTE]: "1" },
+          destinationIdentities: [ALICE, BOB],
+        },
+      },
+    ])
+  })
+
+  test("any other reply goes to the whole room", async () => {
+    const participant = sender()
+    await sendReply(participant, "查不到。")
+    expect(participant.calls[0].options).not.toHaveProperty(
+      "destinationIdentities"
+    )
+  })
+
+  test("an empty audience is sent nothing, not everyone", async () => {
+    const participant = sender()
+    await sendReply(participant, SECRET, [])
+    expect(participant.calls).toEqual([])
   })
 })

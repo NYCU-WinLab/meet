@@ -602,7 +602,8 @@ const QUESTION_LINES = 200
 /**
  * Answers one @agent question from the chat: the meeting from the summary
  * and the recent lines, anything else from a web search. Returns plain text
- * with up to 3 sources appended.
+ * with up to 3 sources appended, and, when it quotes past meetings, `to`:
+ * the people they were searched for, the only ones who may read it.
  */
 export async function answer(
   current: Summary,
@@ -615,7 +616,7 @@ export async function answer(
    * Read when the question arrives and again before the answer goes out. */
   audience: () => string[],
   glossary: string[] = []
-): Promise<string> {
+): Promise<{ text: string; to?: string[] }> {
   const members = audience()
   const recent = [...lines].sort((a, b) => a.at - b.at).slice(-QUESTION_LINES)
   const messages: { role: "user" | "assistant"; content: unknown }[] = [
@@ -678,9 +679,11 @@ export async function answer(
   // arrived. Someone who joined since, a guest or a member who may not open
   // those meetings, would read them too, so the answer is dropped.
   if (searched && audience().some((id) => !members.includes(id)))
-    return "剛有人加入，這題用到的過去會議不一定每個人都能看，請再問一次。"
+    return {
+      text: "剛有人加入，這題用到的過去會議不一定每個人都能看，請再問一次。",
+    }
   const text = textOf(data).trim()
-  if (!text) return "這題我答不出來，換個問法試試。"
+  if (!text) return { text: "這題我答不出來，換個問法試試。" }
   const sources = [
     ...new Set(
       data.content.flatMap((part) =>
@@ -692,5 +695,5 @@ export async function answer(
   const parts = [text]
   if (sources.length > 0) parts.push(`來源：\n${sources.join("\n")}`)
   if (watched.length > 0) parts.push(`相關錄影：\n${watched.join("\n")}`)
-  return parts.join("\n\n")
+  return { text: parts.join("\n\n"), ...(searched ? { to: members } : {}) }
 }

@@ -29,6 +29,7 @@ import {
   type AgendaState,
   type Summary,
 } from "./summarize.js"
+import { CHAT_TOPIC, sendReply } from "./chat.js"
 import { RoomMics } from "./room-mic.js"
 import { transcribeChunk } from "./transcribe.js"
 import { keepSummary, keptSummary } from "./usage.js"
@@ -55,13 +56,8 @@ const batchLines = Number(process.env.SUMMARY_BATCH_LINES ?? 40)
 
 export const SAMPLE_RATE = 16000
 export const TOPIC = "meet.summary"
-// What @livekit/components-react's useChat sends on.
-const CHAT_TOPIC = "lk.chat"
 // A chat message that mentions the agent is a question for it.
 const MENTION = /@agent\b/i
-// The meeting page names a chat message carrying this attribute "agent":
-// the agent is hidden, so the page cannot look its name up.
-const AGENT_ATTRIBUTE = "meet.agent"
 /** Who a room microphone's lines are said by: people there, not its account. */
 const ROOM = "會議室"
 /** Marks a line heard from the audio of a screen share: a video or another
@@ -464,12 +460,8 @@ const hasContent = (summary: Summary) =>
 // Answers one @agent question in the chat, and keeps the answer as a line
 // so the summary knows what was said.
 async function ask(meeting: Meeting, who: string, said: string) {
-  const reply = async (text: string) => {
-    await meeting.room.localParticipant?.sendText(text, {
-      topic: CHAT_TOPIC,
-      attributes: { [AGENT_ATTRIBUTE]: "1" },
-    })
-  }
+  const reply = (text: string, to?: string[]) =>
+    sendReply(meeting.room.localParticipant, text, to)
   if (meeting.answering) {
     await reply("上一題還在查，等我回完再問。")
     return
@@ -477,7 +469,7 @@ async function ask(meeting: Meeting, who: string, said: string) {
   meeting.answering = true
   try {
     const question = said.replace(MENTION, "").trim().slice(0, 500)
-    const text = await answer(
+    const { text, to } = await answer(
       meeting.summary,
       meeting.lines,
       who,
@@ -490,7 +482,8 @@ async function ask(meeting: Meeting, who: string, said: string) {
           .map((p) => p.identity),
       glossaryOf(meeting)
     )
-    await reply(text)
+    // An answer quoting past meetings goes only to the people it was searched for.
+    await reply(text, to)
     meeting.lines.push({ at: Date.now(), who: "agent（聊天）", text })
     log(meeting.name, "answered", question.length, "->", text.length, "chars")
   } catch (error) {
