@@ -2,6 +2,7 @@ import { EgressStatus, type WebhookEvent } from "livekit-server-sdk"
 
 import { db } from "@/lib/db"
 import { livekitEvent } from "@/lib/db/schema"
+import { memberOf } from "@/lib/participants"
 
 // LiveKit stamps files in nanoseconds.
 const ns = 1e9
@@ -18,7 +19,8 @@ export async function recordEvent(event: WebhookEvent) {
     at: new Date(Number(event.createdAt) * 1000),
     room: event.room?.name ?? egress?.roomName ?? null,
     roomSid: event.room?.sid ?? egress?.roomId ?? null,
-    participant: participant?.identity ?? null,
+    // The member, not the device: attendance and head counts are per person.
+    participant: participant ? memberOf(participant.identity) : null,
     // Only members count toward minutes; egress joins as a participant too.
     participantSeconds:
       event.event === "participant_left" && participant && !participant.kind

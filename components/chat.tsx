@@ -13,7 +13,7 @@ import remarkBreaks from "remark-breaks"
 import { Markdown } from "@/components/markdown"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { fromSummary } from "@/lib/participants"
+import { fromSummary, memberOf } from "@/lib/participants"
 import { cn } from "@/lib/utils"
 
 // The meeting chat, laid out like Discord: a picture and a name on the
@@ -279,7 +279,7 @@ function Avatar({
   return (
     // eslint-disable-next-line @next/next/no-img-element -- a small private avatar from our own route; next/image would only proxy it again.
     <img
-      src={`/avatars/${encodeURIComponent(sender.identity)}`}
+      src={`/avatars/${encodeURIComponent(memberOf(sender.identity))}`}
       alt=""
       onError={() => setFailed(true)}
       className={cn(base, "bg-muted object-cover")}
