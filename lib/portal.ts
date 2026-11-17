@@ -11,7 +11,10 @@ export type ProjectGroup = { name: string; label: string }
  * recordings. */
 type GroupMembers = ProjectGroup & { members: string[] }
 
-let cache: { at: number; groups: GroupMembers[] } | null = null
+let cache: { at: number; seq: number; groups: GroupMembers[] } | null = null
+/** Orders reads by when they started, even within one millisecond; `at`
+ * only keeps the TTL. */
+let readSeq = 0
 const ttl = 5 * 60 * 1000
 /** After portal fails, answer from the failure for a minute instead of
  * waiting 5 seconds on every request (a video's Range requests above all). */
@@ -50,6 +53,7 @@ async function groupsWithMembers(fresh = false): Promise<GroupMembers[]> {
 
 async function fetchGroups(key: string): Promise<GroupMembers[]> {
   const startedAt = Date.now()
+  const seq = ++readSeq
   const response = await fetch(
     "https://portal.winlab.tw/api/actions/list_project_groups",
     {
@@ -75,11 +79,14 @@ async function fetchGroups(key: string): Promise<GroupMembers[]> {
     .sort((a, b) => a.label.localeCompare(b.label, "zh-TW"))
   // A slow response that started before the cached one must not restore
   // what a newer read already saw removed.
-  if (!cache || cache.at < startedAt) cache = { at: startedAt, groups }
+  if (!cache || cache.seq < seq) cache = { at: startedAt, seq, groups }
   return groups
 }
 
-const invites = new Map<string, { at: number; bookings: string[] }>()
+const invites = new Map<
+  string,
+  { at: number; seq: number; bookings: string[] }
+>()
 const inviteTtl = 60 * 1000
 /** Its own backoff: a failing invite lookup never blocks the groups. */
 let invitesFailedAt = 0
@@ -103,6 +110,7 @@ export async function invitedBookings(
   )
     throw new Error("portal 剛才沒有回應")
   const startedAt = Date.now()
+  const seq = ++readSeq
   try {
     const response = await fetch(
       "https://portal.winlab.tw/api/actions/list_invited_bookings",
@@ -122,8 +130,8 @@ export async function invitedBookings(
       ? data.bookings.filter((b): b is string => typeof b === "string")
       : []
     const latest = invites.get(username)
-    if (!latest || latest.at < startedAt)
-      invites.set(username, { at: startedAt, bookings })
+    if (!latest || latest.seq < seq)
+      invites.set(username, { at: startedAt, seq, bookings })
     return bookings
   } catch (error) {
     if (options.fresh) freshInvitesFailedAt = Date.now()
