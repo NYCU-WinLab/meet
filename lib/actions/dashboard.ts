@@ -83,6 +83,18 @@ function split(
   }
 }
 
+/** Joins stays that overlap or touch, so a member on two devices at once
+ * counts once. */
+function mergeSpans(spans: [number, number][]) {
+  const merged: [number, number][] = []
+  for (const [from, to] of [...spans].sort((a, b) => a[0] - b[0])) {
+    const last = merged[merged.length - 1]
+    if (last && from <= last[1]) last[1] = Math.max(last[1], to)
+    else merged.push([from, to])
+  }
+  return merged
+}
+
 const nextWeek = (t: number) => weekStart(t) + WEEK
 const nextHour = (t: number) => Math.floor(t / HOUR) * HOUR + HOUR
 
@@ -140,25 +152,33 @@ export const dashboard = defineAction({
     // Members: their time, the heat map, and per room who came and when.
     type Meeting = { from: number; to: number; members: Set<string> }
     const meetings = new Map<string, Meeting>()
+    const stays = new Map<string, [number, number][]>()
     for (const row of rows) {
       if (row.event !== "participant_left" || !row.member) continue
       const to = row.at.getTime()
       const from = to - (row.participantSeconds ?? 0) * 1000
-      split(from, to, nextWeek, (t, ms) => {
-        const i = weekIndex(t)
-        if (i >= 0) memberMsByWeek[i] += ms
-      })
-      if (to >= firstWeek)
-        split(Math.max(from, firstWeek), to, nextHour, (t, ms) => {
-          heat[weekday(t)][hour(t)] += ms / 60000
-        })
       const key = row.roomSid ?? row.room ?? ""
+      const stayKey = `${key}\n${row.member}`
+      const stay = stays.get(stayKey) ?? []
+      stay.push([from, to])
+      stays.set(stayKey, stay)
       const meeting = meetings.get(key) ?? { from, to, members: new Set() }
       meeting.from = Math.min(meeting.from, from)
       meeting.to = Math.max(meeting.to, to)
       if (row.participant) meeting.members.add(row.participant)
       meetings.set(key, meeting)
     }
+    for (const spans of stays.values())
+      for (const [from, to] of mergeSpans(spans)) {
+        split(from, to, nextWeek, (t, ms) => {
+          const i = weekIndex(t)
+          if (i >= 0) memberMsByWeek[i] += ms
+        })
+        if (to >= firstWeek)
+          split(Math.max(from, firstWeek), to, nextHour, (t, ms) => {
+            heat[weekday(t)][hour(t)] += ms / 60000
+          })
+      }
     let weekMinutes = 0
     let weekMembers = 0
     let weekMeetings = 0
