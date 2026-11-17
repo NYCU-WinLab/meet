@@ -243,11 +243,11 @@ async function username(actor: Actor) {
 async function myGroups(
   name: string,
   fresh = false,
-  snapshot?: Map<string, string[]>
+  snapshot?: Promise<Map<string, string[]>>
 ) {
   if (!name) return [] as string[]
   try {
-    const groups = snapshot ?? (await groupMembers({ fresh }))
+    const groups = await (snapshot ?? groupMembers({ fresh }))
     return [...groups].filter(([, m]) => m.includes(name)).map(([g]) => g)
   } catch (error) {
     emitErrorLog(error, { source: "portal groups" })
@@ -369,7 +369,7 @@ async function visibleRecordings(
   userId: string,
   name: string,
   fresh = false,
-  snapshot?: Map<string, string[]>
+  snapshot?: Promise<Map<string, string[]>>
 ) {
   const [groups, invited] = await Promise.all([
     myGroups(name, fresh, snapshot),
@@ -659,15 +659,14 @@ async function sharedRecordings(asUsers: string[], fresh = false) {
   if (rows.length !== ids.length) return []
   // One group read per check, so every participant is judged against the
   // same snapshot. A failed read leaves no groups, as for one member.
-  let snapshot: Map<string, string[]> | undefined
-  if (fresh) {
-    try {
-      snapshot = await groupMembers({ fresh })
-    } catch (error) {
-      emitErrorLog(error, { source: "portal groups" })
-      snapshot = new Map()
-    }
-  }
+  // The read starts once and every participant awaits it, so the invite
+  // reads run beside it.
+  const snapshot = fresh
+    ? groupMembers({ fresh }).catch((error) => {
+        emitErrorLog(error, { source: "portal groups" })
+        return new Map<string, string[]>()
+      })
+    : undefined
   const each = await Promise.all(
     rows.map((row) =>
       visibleRecordings(row.id, row.username ?? "", fresh, snapshot)
