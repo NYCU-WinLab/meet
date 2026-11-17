@@ -25,6 +25,7 @@ import {
 } from "@/lib/actions/live-summaries"
 import { dashboard } from "@/lib/actions/dashboard"
 import {
+  checkRecordingAccess,
   fileRecording,
   getRecording,
   listMyRecordings,
@@ -62,5 +63,6 @@ export const actions: Action[] = [
   listMyRecordings,
   getRecording,
   searchRecordings,
+  checkRecordingAccess,
   recordingFile,
 ]
