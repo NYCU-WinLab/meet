@@ -6,6 +6,7 @@ import { MAX_ROOMS } from "@/lib/actions/rooms"
 import { db } from "@/lib/db"
 import { aiUsage, livekitEvent, recording, user } from "@/lib/db/schema"
 import { activeRecordings, listRooms } from "@/lib/livekit"
+import { memberOf } from "@/lib/participants"
 
 const weeks = 8
 const DAY = 86400 * 1000
@@ -263,7 +264,12 @@ export const dashboard = defineAction({
       now: {
         rooms: rooms.length,
         maxRooms: MAX_ROOMS,
-        members: rooms.reduce((n, room) => n + room.participants.length, 0),
+        // One member on two devices, or in two rooms, counts once.
+        members: new Set(
+          rooms.flatMap((room) =>
+            room.participants.map((p) => memberOf(p.identity))
+          )
+        ).size,
         recording: recordingNow,
       },
       meetings: trend(meetingsByWeek),
