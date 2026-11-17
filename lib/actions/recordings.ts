@@ -628,6 +628,12 @@ async function searchable(actor: Actor, asUsers?: string[]) {
   }
   if (actor.service !== "summary" || !asUsers?.length)
     throw new Error("只給成員或摘要服務用")
+  return sharedRecordings(asUsers)
+}
+
+/** The recordings every one of these room participants may open; none when
+ * anyone is a guest or not a member. */
+async function sharedRecordings(asUsers: string[]) {
   const ids = [...new Set(asUsers.map(memberOf))]
   // A test participant or a guest has an identity that is not a user id.
   const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -650,6 +656,23 @@ async function searchable(actor: Actor, asUsers?: string[]) {
     )
   return each[0].filter((r) => shared.has(r.id))
 }
+
+export const checkRecordingAccess = defineAction({
+  name: "check_recording_access",
+  title: "檢查錄影權限",
+  description:
+    "For the summary service: whether every recording id is still open to everyone in the room (asUsers). ok is true only when each id is one all of them may open; false when anyone is a guest or not a member, or any id is missing from the shared set. Summary service only.",
+  kind: "query",
+  input: z.object({
+    recordingIds: z.array(id).min(1).max(200),
+    asUsers: z.array(z.string().min(1).max(100)).min(1).max(50),
+  }),
+  async run(actor, { recordingIds, asUsers }) {
+    if (actor.service !== "summary") throw new Error("只給摘要服務用")
+    const shared = new Set((await sharedRecordings(asUsers)).map((r) => r.id))
+    return { ok: recordingIds.every((rid) => shared.has(rid)) }
+  },
+})
 
 export const searchRecordings = defineAction({
   name: "search_recordings",
