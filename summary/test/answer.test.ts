@@ -6,8 +6,10 @@ const ALICE = "11111111-1111-4111-8111-111111111111"
 const BOB = "22222222-2222-4222-8222-222222222222"
 const SECRET = "RCS2 的預算砍半"
 
+const checks: { recordingIds: string[]; asUsers: string[] }[] = []
 const realFetch = globalThis.fetch
 afterEach(() => {
+  checks.length = 0
   globalThis.fetch = realFetch
 })
 
@@ -18,14 +20,19 @@ const reply = (body: unknown) =>
 
 /** The model searches past meetings once, then quotes what it found. While
  * search_recordings runs, `during` changes who is in the room. */
-function fakeServices(hits: number, during: () => void) {
+function fakeServices(
+  hits: number,
+  during: () => void,
+  access: () => Response = () => reply({ ok: true })
+) {
   let turns = 0
-  globalThis.fetch = (async (input: RequestInfo | URL) => {
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
     if (url.endsWith("/api/actions/search_recordings")) {
       during()
       return reply({
         hits: Array.from({ length: hits }, () => ({
+          recordingId: "r1",
           title: "週會",
           startedAt: "2026-11-10T02:00:00.000Z",
           second: 42,
@@ -33,6 +40,10 @@ function fakeServices(hits: number, during: () => void) {
           url: "/recordings/r1?t=42",
         })),
       })
+    }
+    if (url.endsWith("/api/actions/check_recording_access")) {
+      checks.push(JSON.parse(String(init?.body)))
+      return access()
     }
     if (url.endsWith("/api/actions/record_ai_usage")) return reply({})
     turns++
@@ -106,6 +117,35 @@ describe("answer and who reads it", () => {
     const sent = await respond(room)
     expect(sent.text).toBe("查不到。")
     expect(sent.to).toBeUndefined()
+  })
+})
+
+describe("check_recording_access before sending", () => {
+  test("asks with the quoted recordings and the whole room", async () => {
+    const room = [ALICE, BOB]
+    fakeServices(1, () => {})
+    await ask(room)
+    expect(checks).toEqual([{ recordingIds: ["r1"], asUsers: [ALICE, BOB] }])
+  })
+
+  for (const [name, access] of [
+    ["ok false", () => reply({ ok: false })],
+    ["400", () => new Response("{}", { status: 400 })],
+    ["404", () => new Response("{}", { status: 404 })],
+  ] as const) {
+    test(`a ${name} suppresses the recording-derived answer`, async () => {
+      fakeServices(1, () => {}, access)
+      const sent = await respond([ALICE, BOB])
+      expect(sent.text).not.toContain(SECRET)
+      expect(sent.text).not.toContain("/recordings/r1")
+      expect(sent.to).toBeUndefined()
+    })
+  }
+
+  test("no search hits means no check", async () => {
+    fakeServices(0, () => {})
+    await ask([ALICE])
+    expect(checks).toEqual([])
   })
 })
 
