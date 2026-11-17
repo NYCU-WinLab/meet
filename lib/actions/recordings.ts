@@ -240,10 +240,14 @@ async function username(actor: Actor) {
 }
 
 /** The project groups this member is in; none when portal does not answer. */
-async function myGroups(name: string, fresh = false) {
+async function myGroups(
+  name: string,
+  fresh = false,
+  snapshot?: Map<string, string[]>
+) {
   if (!name) return [] as string[]
   try {
-    const groups = await groupMembers({ fresh })
+    const groups = snapshot ?? (await groupMembers({ fresh }))
     return [...groups].filter(([, m]) => m.includes(name)).map(([g]) => g)
   } catch (error) {
     emitErrorLog(error, { source: "portal groups" })
@@ -361,9 +365,14 @@ async function mine(actor: Actor, recordingId: string) {
 /** The recordings this member may open, newest first: rooms they opened
  * or booked, their project groups' rooms, bookings that invited them, and
  * rooms they were in while the recording ran. */
-async function visibleRecordings(userId: string, name: string, fresh = false) {
+async function visibleRecordings(
+  userId: string,
+  name: string,
+  fresh = false,
+  snapshot?: Map<string, string[]>
+) {
   const [groups, invited] = await Promise.all([
-    myGroups(name, fresh),
+    myGroups(name, fresh, snapshot),
     myInvites(name, fresh),
   ])
   const joined = await db
@@ -648,8 +657,21 @@ async function sharedRecordings(asUsers: string[], fresh = false) {
     .where(inArray(user.id, ids))
   // Someone in the room who is not a member: nothing is safe to show.
   if (rows.length !== ids.length) return []
+  // One group read per check, so every participant is judged against the
+  // same snapshot. A failed read leaves no groups, as for one member.
+  let snapshot: Map<string, string[]> | undefined
+  if (fresh) {
+    try {
+      snapshot = await groupMembers({ fresh })
+    } catch (error) {
+      emitErrorLog(error, { source: "portal groups" })
+      snapshot = new Map()
+    }
+  }
   const each = await Promise.all(
-    rows.map((row) => visibleRecordings(row.id, row.username ?? "", fresh))
+    rows.map((row) =>
+      visibleRecordings(row.id, row.username ?? "", fresh, snapshot)
+    )
   )
   const shared = each
     .slice(1)

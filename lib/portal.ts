@@ -16,6 +16,9 @@ const ttl = 5 * 60 * 1000
 /** After portal fails, answer from the failure for a minute instead of
  * waiting 5 seconds on every request (a video's Range requests above all). */
 let failedAt = 0
+/** Fresh reads keep their own backoff, so a timed-out fresh read never makes
+ * cold-cache playback, listing and search see no groups. */
+let freshFailedAt = 0
 
 export async function projectGroups(): Promise<ProjectGroup[]> {
   return (await groupsWithMembers()).map(({ name, label }) => ({ name, label }))
@@ -34,16 +37,19 @@ async function groupsWithMembers(fresh = false): Promise<GroupMembers[]> {
   if (!fresh && cache && Date.now() - cache.at < ttl) return cache.groups
   const key = process.env.PORTAL_API_KEY
   if (!key) return []
-  if (Date.now() - failedAt < 60_000) throw new Error("portal 剛才沒有回應")
+  if (Date.now() - (fresh ? freshFailedAt : failedAt) < 60_000)
+    throw new Error("portal 剛才沒有回應")
   try {
     return await fetchGroups(key)
   } catch (error) {
-    failedAt = Date.now()
+    if (fresh) freshFailedAt = Date.now()
+    else failedAt = Date.now()
     throw error
   }
 }
 
 async function fetchGroups(key: string): Promise<GroupMembers[]> {
+  const startedAt = Date.now()
   const response = await fetch(
     "https://portal.winlab.tw/api/actions/list_project_groups",
     {
@@ -67,7 +73,9 @@ async function fetchGroups(key: string): Promise<GroupMembers[]> {
       members: (members ?? []).flatMap((m) => (m.username ? [m.username] : [])),
     }))
     .sort((a, b) => a.label.localeCompare(b.label, "zh-TW"))
-  cache = { at: Date.now(), groups }
+  // A slow response that started before the cached one must not restore
+  // what a newer read already saw removed.
+  if (!cache || cache.at < startedAt) cache = { at: startedAt, groups }
   return groups
 }
 
@@ -75,6 +83,7 @@ const invites = new Map<string, { at: number; bookings: string[] }>()
 const inviteTtl = 60 * 1000
 /** Its own backoff: a failing invite lookup never blocks the groups. */
 let invitesFailedAt = 0
+let freshInvitesFailedAt = 0
 
 /** The booking ids (room-booking-…) whose attendees list this username;
  * throws when portal does not answer within 5 seconds. `fresh` skips the
@@ -88,8 +97,12 @@ export async function invitedBookings(
     return cached.bookings
   const key = process.env.PORTAL_API_KEY
   if (!key) return []
-  if (Date.now() - invitesFailedAt < 60_000)
+  if (
+    Date.now() - (options.fresh ? freshInvitesFailedAt : invitesFailedAt) <
+    60_000
+  )
     throw new Error("portal 剛才沒有回應")
+  const startedAt = Date.now()
   try {
     const response = await fetch(
       "https://portal.winlab.tw/api/actions/list_invited_bookings",
@@ -108,10 +121,13 @@ export async function invitedBookings(
     const bookings = Array.isArray(data.bookings)
       ? data.bookings.filter((b): b is string => typeof b === "string")
       : []
-    invites.set(username, { at: Date.now(), bookings })
+    const latest = invites.get(username)
+    if (!latest || latest.at < startedAt)
+      invites.set(username, { at: startedAt, bookings })
     return bookings
   } catch (error) {
-    invitesFailedAt = Date.now()
+    if (options.fresh) freshInvitesFailedAt = Date.now()
+    else invitesFailedAt = Date.now()
     throw error
   }
 }
