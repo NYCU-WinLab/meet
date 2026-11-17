@@ -483,10 +483,11 @@ async function ask(meeting: Meeting, who: string, said: string) {
       who,
       question,
       meeting.name,
-      // Everyone who reads the answer, read when it is asked.
-      [...meeting.room.remoteParticipants.values()]
-        .filter((p) => p.kind === ParticipantKind.STANDARD)
-        .map((p) => p.identity),
+      // Everyone who reads the answer.
+      () =>
+        [...meeting.room.remoteParticipants.values()]
+          .filter((p) => p.kind === ParticipantKind.STANDARD)
+          .map((p) => p.identity),
       glossaryOf(meeting)
     )
     await reply(text)
