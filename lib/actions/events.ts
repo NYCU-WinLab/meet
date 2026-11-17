@@ -21,6 +21,7 @@ export async function recordEvent(event: WebhookEvent) {
     roomSid: event.room?.sid ?? egress?.roomId ?? null,
     // The member, not the device: attendance and head counts are per person.
     participant: participant ? memberOf(participant.identity) : null,
+    participantSid: participant?.sid ?? null,
     // Only members count toward minutes; egress joins as a participant too.
     participantSeconds:
       event.event === "participant_left" && participant && !participant.kind
