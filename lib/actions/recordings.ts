@@ -240,10 +240,10 @@ async function username(actor: Actor) {
 }
 
 /** The project groups this member is in; none when portal does not answer. */
-async function myGroups(name: string) {
+async function myGroups(name: string, fresh = false) {
   if (!name) return [] as string[]
   try {
-    const groups = await groupMembers()
+    const groups = await groupMembers({ fresh })
     return [...groups].filter(([, m]) => m.includes(name)).map(([g]) => g)
   } catch (error) {
     emitErrorLog(error, { source: "portal groups" })
@@ -253,10 +253,10 @@ async function myGroups(name: string) {
 
 /** The bookings this member was invited to; none when portal does not
  * answer. */
-async function myInvites(name: string) {
+async function myInvites(name: string, fresh = false) {
   if (!name) return [] as string[]
   try {
-    return await invitedBookings(name)
+    return await invitedBookings(name, { fresh })
   } catch (error) {
     emitErrorLog(error, { source: "portal invites" })
     return []
@@ -361,8 +361,11 @@ async function mine(actor: Actor, recordingId: string) {
 /** The recordings this member may open, newest first: rooms they opened
  * or booked, their project groups' rooms, bookings that invited them, and
  * rooms they were in while the recording ran. */
-async function visibleRecordings(userId: string, name: string) {
-  const [groups, invited] = await Promise.all([myGroups(name), myInvites(name)])
+async function visibleRecordings(userId: string, name: string, fresh = false) {
+  const [groups, invited] = await Promise.all([
+    myGroups(name, fresh),
+    myInvites(name, fresh),
+  ])
   const joined = await db
     .selectDistinct({ room: livekitEvent.room })
     .from(livekitEvent)
@@ -632,8 +635,9 @@ async function searchable(actor: Actor, asUsers?: string[]) {
 }
 
 /** The recordings every one of these room participants may open; none when
- * anyone is a guest or not a member. */
-async function sharedRecordings(asUsers: string[]) {
+ * anyone is a guest or not a member. `fresh` reads portal again instead of
+ * its caches. */
+async function sharedRecordings(asUsers: string[], fresh = false) {
   const ids = [...new Set(asUsers.map(memberOf))]
   // A test participant or a guest has an identity that is not a user id.
   const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -645,7 +649,7 @@ async function sharedRecordings(asUsers: string[]) {
   // Someone in the room who is not a member: nothing is safe to show.
   if (rows.length !== ids.length) return []
   const each = await Promise.all(
-    rows.map((row) => visibleRecordings(row.id, row.username ?? ""))
+    rows.map((row) => visibleRecordings(row.id, row.username ?? "", fresh))
   )
   const shared = each
     .slice(1)
@@ -669,7 +673,9 @@ export const checkRecordingAccess = defineAction({
   }),
   async run(actor, { recordingIds, asUsers }) {
     if (actor.service !== "summary") throw new Error("只給摘要服務用")
-    const shared = new Set((await sharedRecordings(asUsers)).map((r) => r.id))
+    const shared = new Set(
+      (await sharedRecordings(asUsers, true)).map((r) => r.id)
+    )
     return { ok: recordingIds.every((rid) => shared.has(rid)) }
   },
 })

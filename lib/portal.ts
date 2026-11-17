@@ -22,12 +22,16 @@ export async function projectGroups(): Promise<ProjectGroup[]> {
 }
 
 /** The usernames in each project group, by slug. */
-export async function groupMembers(): Promise<Map<string, string[]>> {
-  return new Map((await groupsWithMembers()).map((g) => [g.name, g.members]))
+export async function groupMembers(
+  options: { fresh?: boolean } = {}
+): Promise<Map<string, string[]>> {
+  return new Map(
+    (await groupsWithMembers(options.fresh)).map((g) => [g.name, g.members])
+  )
 }
 
-async function groupsWithMembers(): Promise<GroupMembers[]> {
-  if (cache && Date.now() - cache.at < ttl) return cache.groups
+async function groupsWithMembers(fresh = false): Promise<GroupMembers[]> {
+  if (!fresh && cache && Date.now() - cache.at < ttl) return cache.groups
   const key = process.env.PORTAL_API_KEY
   if (!key) return []
   if (Date.now() - failedAt < 60_000) throw new Error("portal 剛才沒有回應")
@@ -73,10 +77,15 @@ const inviteTtl = 60 * 1000
 let invitesFailedAt = 0
 
 /** The booking ids (room-booking-…) whose attendees list this username;
- * throws when portal does not answer within 5 seconds. */
-export async function invitedBookings(username: string): Promise<string[]> {
+ * throws when portal does not answer within 5 seconds. `fresh` skips the
+ * cache for a decision a later revocation cannot take back. */
+export async function invitedBookings(
+  username: string,
+  options: { fresh?: boolean } = {}
+): Promise<string[]> {
   const cached = invites.get(username)
-  if (cached && Date.now() - cached.at < inviteTtl) return cached.bookings
+  if (!options.fresh && cached && Date.now() - cached.at < inviteTtl)
+    return cached.bookings
   const key = process.env.PORTAL_API_KEY
   if (!key) return []
   if (Date.now() - invitesFailedAt < 60_000)
