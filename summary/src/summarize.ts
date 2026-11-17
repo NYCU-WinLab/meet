@@ -38,6 +38,7 @@ const tools = [
 ]
 
 type Hit = {
+  recordingId: string
   title: string
   startedAt: string
   second: number
@@ -65,6 +66,35 @@ async function searchMeetings(
     ...hit,
     url: new URL(hit.url, meetUrl).toString(),
   }))
+}
+
+/** Whether every recording is still open to everyone in `asUsers`, read
+ * fresh from portal. Anything but `{ ok: true }`, including a failed call
+ * (portal down: 400, an older meet: 404), is no. */
+async function recordingsOpen(
+  recordingIds: string[],
+  asUsers: string[]
+): Promise<boolean> {
+  if (!serviceKey || recordingIds.length === 0 || asUsers.length === 0)
+    return false
+  try {
+    const response = await fetch(
+      `${meetUrl}/api/actions/check_recording_access`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${serviceKey}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ recordingIds, asUsers }),
+        signal: AbortSignal.timeout(20_000),
+      }
+    )
+    if (!response.ok) return false
+    return ((await response.json()) as { ok?: unknown }).ok === true
+  } catch {
+    return false
+  }
 }
 
 /** One agenda item and how far the meeting has covered it. */
@@ -630,6 +660,7 @@ export async function answer(
   // A long search can pause the turn, and search_meetings runs here; send
   // the turn back until the model is done, at most 6 times.
   const recordings: string[] = []
+  const recordingIds = new Set<string>()
   let searched = false
   for (
     let i = 0;
@@ -651,7 +682,10 @@ export async function answer(
               return null
             })
             if (hits?.length) searched = true
-            for (const hit of hits ?? []) recordings.push(hit.url)
+            for (const hit of hits ?? []) {
+              recordings.push(hit.url)
+              recordingIds.add(hit.recordingId)
+            }
             return {
               type: "tool_result",
               tool_use_id: part.id,
@@ -682,6 +716,14 @@ export async function answer(
     return {
       text: "剛有人加入，這題用到的過去會議不一定每個人都能看，請再問一次。",
     }
+  // Meet read the cache when it searched. Before anything quoting those
+  // recordings goes out, ask again with fresh grants, for the people in the
+  // room now, who are the only ones it is sent to.
+  const recipients = audience()
+  if (searched && !(await recordingsOpen([...recordingIds], recipients)))
+    return {
+      text: "這題用到的過去會議現在不一定每個人都能看，所以不回答。",
+    }
   const text = textOf(data).trim()
   if (!text) return { text: "這題我答不出來，換個問法試試。" }
   const sources = [
@@ -695,5 +737,5 @@ export async function answer(
   const parts = [text]
   if (sources.length > 0) parts.push(`來源：\n${sources.join("\n")}`)
   if (watched.length > 0) parts.push(`相關錄影：\n${watched.join("\n")}`)
-  return { text: parts.join("\n\n"), ...(searched ? { to: members } : {}) }
+  return { text: parts.join("\n\n"), ...(searched ? { to: recipients } : {}) }
 }
