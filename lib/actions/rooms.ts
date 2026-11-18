@@ -63,7 +63,9 @@ const when = z.coerce.date()
  */
 async function checkGroup(actor: Actor, name?: string) {
   if (!name || actor.service === "portal") return
-  const groups = await projectGroups()
+  const groups = await projectGroups().catch(() => {
+    throw new RefusalError("暫時無法確認專案群組，請一分鐘後再試")
+  })
   if (!groups.some((g) => g.name === name))
     throw new RefusalError("沒有這個專案群組")
 }
