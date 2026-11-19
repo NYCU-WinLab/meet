@@ -24,6 +24,9 @@ export const livekitEvent = pgTable(
     /** On participant events: the member (meet user id, device part dropped),
      * or the identity of a guest, the recorder or an agent. */
     participant: text(),
+    /** On participant events: LiveKit's sid for this one connection, so two
+     * devices of one member stay apart. Null on rows from before it was kept. */
+    participantSid: text(),
     /** How long they stayed, on participant_left. */
     participantSeconds: integer(),
     /** On participant events: a member, not the recorder, an agent or the

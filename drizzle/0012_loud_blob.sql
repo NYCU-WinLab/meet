@@ -1,0 +1,1 @@
+ALTER TABLE "livekit_events" ADD COLUMN "participant_sid" text;
