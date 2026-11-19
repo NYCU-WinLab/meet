@@ -314,7 +314,10 @@ export function memberSpans(rows: PresenceRow[]) {
       open.set(key, { room: row.room, roomSid: row.roomSid, from: at })
     } else {
       // A leave also says how long they stayed, so a lost join still counts.
-      const from = held?.from ?? at - (row.seconds ?? 0) * 1000
+      // The join row is stamped when its webhook arrived, which can be a few
+      // seconds after the real join, so the earlier of the two starts it.
+      const lengthFrom = at - (row.seconds ?? 0) * 1000
+      const from = held ? Math.min(held.from, lengthFrom) : lengthFrom
       add(row.room, from, at)
       // Without a sid, two devices interleave on one key; the leave's own
       // length keeps the first device's stretch whole.
