@@ -74,4 +74,13 @@ describe("memberSpans", () => {
     ])
     expect(spans.get("r")).toEqual([[1000, 9000]])
   })
+
+  test("a matched leave moves its start back by at most a minute", () => {
+    const T = 1_800_000_000_000
+    const spans = memberSpans([
+      row("participant_joined", T - 60_000, { participantSid: "PA" }),
+      row("participant_left", T, { participantSid: "PA", seconds: T / 1000 }),
+    ])
+    expect(spans.get("r")).toEqual([[T - 120_000, T]])
+  })
 })

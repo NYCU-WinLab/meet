@@ -276,6 +276,10 @@ type PresenceRow = {
   seconds: number | null
 }
 
+/** How far a leave's length may move a matched join's start back: the delay
+ * of the join webhook, not a whole earlier meeting. */
+const JOIN_SLACK_MS = 60_000
+
 /** The stretches a member was in each room, as [from, to] in ms, from their
  * join, leave and room_finished rows in time order. Each device (participant
  * sid) has its own open join, which ends at its own leave, or at
@@ -315,9 +319,12 @@ export function memberSpans(rows: PresenceRow[]) {
     } else {
       // A leave also says how long they stayed, so a lost join still counts.
       // The join row is stamped when its webhook arrived, which can be a few
-      // seconds after the real join, so the earlier of the two starts it.
+      // seconds after the real join, so the earlier of the two starts it, but
+      // never more than JOIN_SLACK_MS before the join.
       const lengthFrom = at - (row.seconds ?? 0) * 1000
-      const from = held ? Math.min(held.from, lengthFrom) : lengthFrom
+      const from = held
+        ? Math.min(held.from, Math.max(lengthFrom, held.from - JOIN_SLACK_MS))
+        : lengthFrom
       add(row.room, from, at)
       // Without a sid, two devices interleave on one key; the leave's own
       // length keeps the first device's stretch whole.
