@@ -267,20 +267,99 @@ async function myInvites(name: string, fresh = false) {
   }
 }
 
-/** The stretches this member was in each room, as [from, to] in ms. A join
- * ends at the member's leave, or at room_finished of the same room session.
- * A join with neither (a lost webhook) counts only at its own moment, so a
- * lost leave never stretches into a later recording of the room. */
-async function presence(userId: string, rooms: string[]) {
+type PresenceRow = {
+  event: string
+  at: Date
+  room: string | null
+  roomSid: string | null
+  participantSid: string | null
+  seconds: number | null
+}
+
+/** The stretches a member was in each room, as [from, to] in ms, from their
+ * join, leave and room_finished rows in time order. Each device (participant
+ * sid) has its own open join, which ends at its own leave, or at
+ * room_finished of the same room session. A join with neither (a lost
+ * webhook) counts only at its own moment, so a lost leave never stretches
+ * into a later recording of the room. Rows with no sid share one join per
+ * room, and a leave with a sid and no join of its own ends that one.
+ * Overlapping stretches of a room are merged. */
+export function memberSpans(rows: PresenceRow[]) {
+  const raw = new Map<string, [number, number][]>()
+  const open = new Map<
+    string,
+    { room: string; roomSid: string | null; from: number }
+  >()
+  const add = (room: string, from: number, to: number) =>
+    raw.set(room, [...(raw.get(room) ?? []), [from, to]])
+  for (const row of rows) {
+    if (!row.room) continue
+    const at = row.at.getTime()
+    const key = `${row.room}\0${row.participantSid ?? ""}`
+    const held = open.get(key)
+    if (row.event === "room_finished") {
+      // Only the session this join was in; with no sid on either side, the
+      // room closing still ends it.
+      for (const [k, join] of open) {
+        if (join.room !== row.room) continue
+        if (join.roomSid && row.roomSid && join.roomSid !== row.roomSid)
+          continue
+        add(row.room, join.from, at)
+        open.delete(k)
+      }
+    } else if (row.event === "participant_joined") {
+      // A second join on the same device before its leave: the first one's
+      // end was lost.
+      if (held) add(row.room, held.from, held.from)
+      open.set(key, { room: row.room, roomSid: row.roomSid, from: at })
+    } else {
+      // A leave also says how long they stayed, so a lost join still counts.
+      const from = held?.from ?? at - (row.seconds ?? 0) * 1000
+      add(row.room, from, at)
+      // Without a sid, two devices interleave on one key; the leave's own
+      // length keeps the first device's stretch whole.
+      if (!row.participantSid && row.seconds)
+        add(row.room, at - row.seconds * 1000, at)
+      open.delete(key)
+      // A join written before rows had a sid, left after they did: the
+      // leave lands on its own key, so it ends the room's sid-less join.
+      const legacyKey = `${row.room}\0`
+      const legacy = open.get(legacyKey)
+      if (
+        !held &&
+        row.participantSid &&
+        legacy &&
+        !(legacy.roomSid && row.roomSid && legacy.roomSid !== row.roomSid)
+      ) {
+        add(row.room, legacy.from, at)
+        open.delete(legacyKey)
+      }
+    }
+  }
+  for (const join of open.values()) add(join.room, join.from, join.from)
   const spans = new Map<string, [number, number][]>()
-  if (rooms.length === 0) return spans
+  for (const [room, list] of raw) {
+    const merged: [number, number][] = []
+    for (const [from, to] of list.sort((x, y) => x[0] - y[0])) {
+      const last = merged[merged.length - 1]
+      if (last && from <= last[1]) last[1] = Math.max(last[1], to)
+      else merged.push([from, to])
+    }
+    spans.set(room, merged)
+  }
+  return spans
+}
+
+/** The stretches this member was in each room; see memberSpans. */
+async function presence(userId: string, rooms: string[]) {
+  if (rooms.length === 0) return new Map<string, [number, number][]>()
   const rows = await db
     .select({
       event: livekitEvent.event,
       at: livekitEvent.at,
       room: livekitEvent.room,
       roomSid: livekitEvent.roomSid,
-      participant: livekitEvent.participant,
+      participantSid: livekitEvent.participantSid,
       seconds: livekitEvent.participantSeconds,
     })
     .from(livekitEvent)
@@ -300,36 +379,7 @@ async function presence(userId: string, rooms: string[]) {
       )
     )
     .orderBy(asc(livekitEvent.at))
-  const open = new Map<string, { from: number; sid: string | null }>()
-  const add = (room: string, from: number, to: number) =>
-    spans.set(room, [...(spans.get(room) ?? []), [from, to]])
-  for (const row of rows) {
-    if (!row.room) continue
-    const at = row.at.getTime()
-    const held = open.get(row.room)
-    if (row.event === "room_finished") {
-      // Only the session this join was in; with no sid on either side, the
-      // room closing still ends it.
-      if (held && (!held.sid || !row.roomSid || held.sid === row.roomSid)) {
-        add(row.room, held.from, at)
-        open.delete(row.room)
-      }
-    } else if (row.event === "participant_joined") {
-      // A second join before any leave: the first one's end was lost.
-      if (held) add(row.room, held.from, held.from)
-      open.set(row.room, { from: at, sid: row.roomSid })
-    } else {
-      // A leave also says how long they stayed, so a lost join still counts.
-      const from = held?.from ?? at - (row.seconds ?? 0) * 1000
-      add(row.room, from, at)
-      // Two devices interleave joins and leaves; the leave's own length
-      // keeps the first device's stretch whole.
-      if (row.seconds) add(row.room, at - row.seconds * 1000, at)
-      open.delete(row.room)
-    }
-  }
-  for (const [room, held] of open) add(room, held.from, held.from)
-  return spans
+  return memberSpans(rows)
 }
 
 const attended = (
