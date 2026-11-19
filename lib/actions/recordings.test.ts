@@ -57,4 +57,13 @@ describe("memberSpans", () => {
     ])
     expect(spans.get("r")).toEqual([[2000, 5000]])
   })
+
+  test("a leave with a sid ends a join written before sids", () => {
+    const spans = memberSpans([
+      row("participant_joined", 1000),
+      row("participant_left", 2000, { participantSid: "PA", seconds: 1 }),
+      row("room_finished", 9000),
+    ])
+    expect(spans.get("r")).toEqual([[1000, 2000]])
+  })
 })

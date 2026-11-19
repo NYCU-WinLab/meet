@@ -282,7 +282,8 @@ type PresenceRow = {
  * room_finished of the same room session. A join with neither (a lost
  * webhook) counts only at its own moment, so a lost leave never stretches
  * into a later recording of the room. Rows with no sid share one join per
- * room. Overlapping stretches of a room are merged. */
+ * room, and a leave with a sid and no join of its own ends that one.
+ * Overlapping stretches of a room are merged. */
 export function memberSpans(rows: PresenceRow[]) {
   const raw = new Map<string, [number, number][]>()
   const open = new Map<
@@ -320,6 +321,19 @@ export function memberSpans(rows: PresenceRow[]) {
       if (!row.participantSid && row.seconds)
         add(row.room, at - row.seconds * 1000, at)
       open.delete(key)
+      // A join written before rows had a sid, left after they did: the
+      // leave lands on its own key, so it ends the room's sid-less join.
+      const legacyKey = `${row.room}\0`
+      const legacy = open.get(legacyKey)
+      if (
+        !held &&
+        row.participantSid &&
+        legacy &&
+        !(legacy.roomSid && row.roomSid && legacy.roomSid !== row.roomSid)
+      ) {
+        add(row.room, legacy.from, at)
+        open.delete(legacyKey)
+      }
     }
   }
   for (const join of open.values()) add(join.room, join.from, join.from)
